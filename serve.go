@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -38,8 +39,12 @@ func serveCmd(args []string) {
 
 	wikiPath := flags.Arg(0)
 	if wikiPath[0] == '~' {
-		home, _ := os.UserHomeDir()
-		wikiPath = home + wikiPath[1:]
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cannot determine home directory: %v\n", err)
+			os.Exit(1)
+		}
+		wikiPath = filepath.Join(home, wikiPath[1:])
 	}
 
 	var err error
@@ -51,6 +56,11 @@ func serveCmd(args []string) {
 
 	if !git.IsRepo(wikiPath) {
 		fmt.Fprintf(os.Stderr, "❌ 不是 Git 仓库: %s\n", wikiPath)
+		os.Exit(1)
+	}
+
+	if *interval <= 0 {
+		fmt.Fprintln(os.Stderr, "❌ --interval 必须大于 0")
 		os.Exit(1)
 	}
 
@@ -105,8 +115,9 @@ func printServeHelp() {
 	fmt.Println()
 	fmt.Println("选项:")
 	fmt.Println("  --interval N  同步间隔（分钟，默认 10）")
-	fmt.Println("  --name NAME   提交者名字")
-	fmt.Println("  --email E     提交者邮箱")
+	fmt.Println("  --name NAME   提交者名字（默认 \"AI Assistant\"）")
+	fmt.Println("  --email E     提交者邮箱（默认 \"ai@local\"）")
+	fmt.Println("  --version     显示版本")
 	fmt.Println()
 	fmt.Println("示例:")
 	fmt.Println("  wiki-tools serve ~/team-wiki")

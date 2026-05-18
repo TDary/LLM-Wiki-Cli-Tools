@@ -66,6 +66,8 @@ Environment variables for `wiki-tools sync` (CLI flags take priority):
 | `GIT_SYNC_EMAIL` | `ai@local` | Committer email |
 | `GIT_SYNC_MESSAGE` | `auto sync: {timestamp}` | Commit message template |
 | `GIT_SYNC_DRY_RUN` | `0` | Set to `1` for preview mode |
+| `GIT_SYNC_BRANCH` | current branch | Target branch for push |
+| `GIT_SYNC_FORCE_PUSH` | `0` | Set to `1` for force-with-lease on push failure |
 
 ## Download
 

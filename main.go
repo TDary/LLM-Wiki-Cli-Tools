@@ -93,7 +93,10 @@ func absPath(p string) (string, error) {
 		return os.Getwd()
 	}
 	if p[0] == '~' {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
 		p = filepath.Join(home, p[1:])
 	}
 	return filepath.Abs(p)

@@ -37,10 +37,14 @@ func initCmd(args []string) {
 
 	wikiPath := cfg.wikiPath
 	if wikiPath[0] == '~' {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cannot determine home directory: %v\n", err)
+			os.Exit(1)
+		}
 		wikiPath = filepath.Join(home, wikiPath[1:])
 	}
-	wikiPath, err := wiki.AbsPath(wikiPath)
+	wikiPath, err := filepath.Abs(wikiPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ 路径解析失败: %v\n", err)
 		os.Exit(2)
@@ -70,7 +74,7 @@ func initCmd(args []string) {
 			fmt.Fprintf(os.Stderr, "❌ git add 失败: %v\n", err)
 			os.Exit(2)
 		}
-		committed, err := git.Commit(wikiPath, "Initial commit: wiki-tools init bootstrap")
+		committed, err := git.Commit(wikiPath, "Initial commit via wiki-tools")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "❌ git commit 失败: %v\n", err)
 			os.Exit(2)
@@ -97,7 +101,7 @@ func parseInitArgs(args []string) initConfig {
 		a := args[i]
 		switch a {
 		case "--name":
-			i++; if i < len(args) { cfg.name = args[i] }
+			i++; if i < len(args) { cfg.name = args[i] } else { fmt.Fprintln(os.Stderr, "--name requires a value"); os.Exit(1) }
 		case "--no-git":
 			cfg.noGit = true
 		case "--force":

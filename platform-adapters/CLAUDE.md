@@ -1,6 +1,6 @@
 # Claude Code Wiki Integration
 
-When working with this wiki, use `wiki-tools` (Go binary, installed at `~/.local/bin/` or anywhere in PATH).
+When working with this wiki, use `wiki-tools` (Go static binary, place it anywhere in PATH).
 
 ## One-Command Setup
 

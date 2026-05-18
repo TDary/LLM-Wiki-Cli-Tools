@@ -1,6 +1,6 @@
 # Build artifacts
+wiki-tools
 wiki-tools.exe
-dist/
 
 # IDE
 .vscode/

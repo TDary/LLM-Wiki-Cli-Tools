@@ -23,6 +23,12 @@ type bootstrapConfig struct {
 	local                         bool
 }
 
+func argErr(msg string) {
+	fmt.Fprintf(os.Stderr, "❌ %s\n", msg)
+	printBootstrapHelp()
+	os.Exit(1)
+}
+
 func parseBootstrapArgs(args []string) bootstrapConfig {
 	cfg := bootstrapConfig{
 		domain:         "LLM Wiki 知识库",
@@ -36,17 +42,27 @@ func parseBootstrapArgs(args []string) bootstrapConfig {
 		a := args[i]
 		switch a {
 		case "--name":
-			i++; if i < len(args) { cfg.name = args[i] }
+			i++; if i < len(args) { cfg.name = args[i] } else { argErr("--name requires a value") }
 		case "--domain":
-			i++; if i < len(args) { cfg.domain = args[i] }
+			i++; if i < len(args) { cfg.domain = args[i] } else { argErr("--domain requires a value") }
 		case "--sync-interval":
-			i++; if i < len(args) { cfg.syncInterval, _ = strconv.Atoi(args[i]) }
+			i++
+			if i < len(args) {
+				v, err := strconv.Atoi(args[i])
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "❌ --sync-interval must be a number: %s\n", args[i])
+					os.Exit(1)
+				}
+				cfg.syncInterval = v
+			} else {
+				argErr("--sync-interval requires a value")
+			}
 		case "--committer":
-			i++; if i < len(args) { cfg.committerName = args[i] }
+			i++; if i < len(args) { cfg.committerName = args[i] } else { argErr("--committer requires a value") }
 		case "--committer-email":
-			i++; if i < len(args) { cfg.committerEmail = args[i] }
+			i++; if i < len(args) { cfg.committerEmail = args[i] } else { argErr("--committer-email requires a value") }
 		case "--token":
-			i++; if i < len(args) { cfg.token = args[i] }
+			i++; if i < len(args) { cfg.token = args[i] } else { argErr("--token requires a value") }
 		case "--no-serve":
 			cfg.noServe = true
 		case "--no-clone":
@@ -65,7 +81,7 @@ func parseBootstrapArgs(args []string) bootstrapConfig {
 					cfg.localPath = a
 				}
 			} else {
-				fmt.Fprintf(os.Stderr, "❌ 未知选项: %s\n", a)
+				fmt.Fprintf(os.Stderr, "❌ unknown option: %s\n", a)
 				printBootstrapHelp()
 				os.Exit(1)
 			}
@@ -87,7 +103,11 @@ func parseBootstrapArgs(args []string) bootstrapConfig {
 		cfg.localPath = filepath.Join(home, repoBase)
 	}
 	if cfg.localPath != "" && cfg.localPath[0] == '~' {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ unable to determine home directory: %v\n", err)
+			os.Exit(1)
+		}
 		cfg.localPath = filepath.Join(home, cfg.localPath[1:])
 	}
 	if cfg.localPath != "" {
@@ -113,11 +133,12 @@ func printBootstrapHelp() {
 	fmt.Println("  --committer-email E   提交者邮箱（默认 \"ai@local\"）")
 	fmt.Println("  --no-serve            不启动定时同步守护进程")
 	fmt.Println("  --no-clone            跳过 clone")
-	fmt.Println("  --force               覆盖已存在的 SCHEMA.md")
+	fmt.Println("  --force               覆盖已存在的所有生成文件")
 	fmt.Println("  --token TOKEN         Git 访问令牌")
 	fmt.Println("  --local               纯本地模式（无 URL 时自动启用）")
 	fmt.Println("  --dry-run             预览模式")
 	fmt.Println("  -h, --help            显示帮助")
+	fmt.Println("  --version             显示版本")
 	fmt.Println()
 	fmt.Println("示例:")
 	fmt.Println("  wiki-tools bootstrap git@gitlab.com:group/wiki.git ~/team-wiki")
@@ -133,35 +154,35 @@ func dryRunBootstrap(args []string) {
 		cfg.local = true
 	}
 	fmt.Println()
-	fmt.Println("🔍 DRY RUN — 预览模式，不会执行任何实际操作")
+	fmt.Println("DRY RUN — preview mode, no actions will be executed")
 	fmt.Println()
 
 	if cfg.local {
-		fmt.Println("  将执行的操作（纯本地模式）：")
-		fmt.Printf("    📂 创建目录结构: %s\n", cfg.localPath)
-		fmt.Printf("    📂 wiki-tools init %s \"%s\"\n", cfg.localPath, cfg.domain)
-		fmt.Println("    ⏭️  跳过所有 Git 操作（clone / sync / serve）")
+		fmt.Println("  Planned actions (local mode):")
+		fmt.Printf("    Create directory structure: %s\n", cfg.localPath)
+		fmt.Printf("    wiki-tools init %s \"%s\"\n", cfg.localPath, cfg.domain)
+		fmt.Println("    Skip all Git operations (clone / sync / serve)")
 		fmt.Println()
 		return
 	}
 
-	fmt.Println("  将执行的操作：")
+	fmt.Println("  Planned actions:")
 	if !cfg.noClone {
 		if git.IsRepo(cfg.localPath) {
-			fmt.Println("    📦 Step 1: 检测到已有 Git 仓库，跳过 clone")
+			fmt.Println("    Step 1: Git repo exists, skip clone")
 		} else if _, err := os.Stat(cfg.localPath); err == nil {
-			fmt.Println("    📦 Step 1: 目录已存在，继续初始化")
+			fmt.Println("    Step 1: directory exists, proceed to init")
 		} else {
-			fmt.Printf("    📦 Step 1: git clone %s → %s\n", cfg.remoteURL, cfg.localPath)
+			fmt.Printf("    Step 1: git clone %s -> %s\n", cfg.remoteURL, cfg.localPath)
 		}
 	} else {
-		fmt.Println("    📦 Step 1: --no-clone，跳过 clone")
+		fmt.Println("    Step 1: --no-clone, skip clone")
 	}
-	fmt.Printf("    📂 Step 2: wiki-tools init %s \"%s\"\n", cfg.localPath, cfg.domain)
-	fmt.Println("    🔧 Step 3: 配置 Git remote / committer / credential")
-	fmt.Printf("    🚀 Step 4: wiki-tools sync %s\n", cfg.localPath)
+	fmt.Printf("    Step 2: wiki-tools init %s \"%s\"\n", cfg.localPath, cfg.domain)
+	fmt.Println("    Step 3: configure Git remote / committer / credential")
+	fmt.Printf("    Step 4: wiki-tools sync %s\n", cfg.localPath)
 	if !cfg.noServe && cfg.syncInterval > 0 {
-		fmt.Printf("    ⏰ Step 5: 建议运行 wiki-tools serve %s --interval %d\n", cfg.localPath, cfg.syncInterval)
+		fmt.Printf("    Step 5: suggest running wiki-tools serve %s --interval %d\n", cfg.localPath, cfg.syncInterval)
 	}
 	fmt.Println()
 }
@@ -189,130 +210,130 @@ func bootstrapCmd(args []string) {
 
 	if cfg.local {
 		if cfg.localPath == "" {
-			fmt.Fprintln(os.Stderr, "❌ 缺少本地路径")
+			fmt.Fprintln(os.Stderr, "missing local path")
 			printBootstrapHelp()
 			os.Exit(1)
 		}
 
 		fmt.Println()
 		fmt.Println("╔════════════════════════════════════════════════════════╗")
-		fmt.Println("║     wiki-tools bootstrap · 纯本地模式部署知识库       ║")
+		fmt.Println("║     wiki-tools bootstrap · local mode deployment      ║")
 		fmt.Println("╚════════════════════════════════════════════════════════╝")
 		fmt.Println()
-		fmt.Printf("  项目名:     %s\n", cfg.projectName)
-		fmt.Printf("  领域:       %s\n", cfg.domain)
-		fmt.Printf("  本地路径:   %s\n", cfg.localPath)
-		fmt.Println("  模式:       🌐 纯本地（无 Git 依赖）")
+		fmt.Printf("  project:     %s\n", cfg.projectName)
+		fmt.Printf("  domain:      %s\n", cfg.domain)
+		fmt.Printf("  local path:  %s\n", cfg.localPath)
+		fmt.Println("  mode:        local (no Git)")
 		fmt.Println()
 
 		if err := os.MkdirAll(cfg.localPath, 0755); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ 无法创建目录: %s\n", cfg.localPath)
+			fmt.Fprintf(os.Stderr, "cannot create directory: %s\n", cfg.localPath)
 			os.Exit(3)
 		}
 		if err := wiki.WriteFiles(cfg.localPath, cfg.projectName, cfg.domain, cfg.force, !cfg.local); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ wiki-init 失败: %v\n", err)
+			fmt.Fprintf(os.Stderr, "wiki-init failed: %v\n", err)
 			os.Exit(3)
 		}
 
-		fmt.Printf("✅ wiki-tools init 完成: %s\n", cfg.localPath)
-		fmt.Printf("   领域: %s\n", cfg.domain)
-		fmt.Printf("   目录: %d 个子目录\n", len(wiki.Dirs))
+		fmt.Printf("wiki-tools init completed: %s\n", cfg.localPath)
+		fmt.Printf("   domain: %s\n", cfg.domain)
+		fmt.Printf("   dirs: %d subdirectories\n", len(wiki.Dirs))
 		fmt.Println()
 		fmt.Println("╔════════════════════════════════════════════════════════╗")
-		fmt.Println("║                 ✅ 本地部署完成！                       ║")
+		fmt.Println("║              local deployment complete!                ║")
 		fmt.Println("╚════════════════════════════════════════════════════════╝")
 		fmt.Println()
-		fmt.Printf("  📂 知识库路径:   %s\n", cfg.localPath)
-		fmt.Printf("  📋 SCHEMA:       %s/SCHEMA.md\n", cfg.localPath)
+		fmt.Printf("  wiki path:  %s\n", cfg.localPath)
+		fmt.Printf("  SCHEMA:     %s/SCHEMA.md\n", cfg.localPath)
 		fmt.Println()
-		fmt.Println("  无需 Git，所有页面直接读写本地文件即可。")
+		fmt.Println("  No Git needed — read/write files directly.")
 		fmt.Println()
 		return
 	}
 
 	fmt.Println()
 	fmt.Println("╔════════════════════════════════════════════════════════╗")
-	fmt.Println("║          wiki-tools bootstrap · 一键安装知识库        ║")
+	fmt.Println("║          wiki-tools bootstrap · one-click setup       ║")
 	fmt.Println("╚════════════════════════════════════════════════════════╝")
 	fmt.Println()
-	fmt.Printf("  项目名:     %s\n", cfg.projectName)
-	fmt.Printf("  领域:       %s\n", cfg.domain)
-	fmt.Printf("  本地路径:   %s\n", cfg.localPath)
-	fmt.Printf("  远程仓库:   %s\n", cfg.remoteURL)
-	fmt.Printf("  自动同步:   %d 分钟/次\n", cfg.syncInterval)
-	fmt.Printf("  提交者:     %s <%s>\n", cfg.committerName, cfg.committerEmail)
+	fmt.Printf("  project:     %s\n", cfg.projectName)
+	fmt.Printf("  domain:      %s\n", cfg.domain)
+	fmt.Printf("  local path:  %s\n", cfg.localPath)
+	fmt.Printf("  remote:      %s\n", cfg.remoteURL)
+	fmt.Printf("  auto sync:   every %d min\n", cfg.syncInterval)
+	fmt.Printf("  committer:   %s <%s>\n", cfg.committerName, cfg.committerEmail)
 	if cfg.token != "" {
-		fmt.Println("  Token:      [已提供，将自动写入 ~/.git-credentials]")
+		fmt.Println("  token:       [provided, will write to ~/.git-credentials]")
 	}
 	fmt.Println()
 
 	// Step 1: Clone or verify
 	if !cfg.noClone {
 		if git.IsRepo(cfg.localPath) {
-			fmt.Println("📦 Step 1: 检测到已有 Git 仓库，跳过 clone")
+			fmt.Println("Step 1: Git repo exists, skip clone")
 			_ = git.Fetch(cfg.localPath)
 		} else if _, err := os.Stat(cfg.localPath); err == nil {
-			fmt.Println("📦 Step 1: 目录已存在但非 Git 仓库")
+			fmt.Println("Step 1: directory exists but not a Git repo")
 			entries, _ := os.ReadDir(cfg.localPath)
 			if len(entries) > 0 {
-				fmt.Println("   ⚠️  目录非空，将保留已有内容继续初始化")
+				fmt.Println("   directory not empty, will keep existing content")
 			}
 		} else {
-			fmt.Printf("📦 Step 1: git clone %s → %s\n", cfg.remoteURL, cfg.localPath)
+			fmt.Printf("Step 1: git clone %s -> %s\n", cfg.remoteURL, cfg.localPath)
 			if err := git.Clone(nil, cfg.remoteURL, cfg.localPath); err != nil {
-				fmt.Println("   ⚠️  clone 失败，将初始化本地仓库（可稍后手动关联远程）")
+				fmt.Println("   clone failed, initializing local repo (you can add remote later)")
 				os.MkdirAll(cfg.localPath, 0755)
 				_ = git.Init(cfg.localPath)
 				_ = git.RemoteAdd(cfg.localPath, cfg.remoteURL)
 			} else {
-				fmt.Println("   ✅ clone 成功")
+				fmt.Println("   clone succeeded")
 			}
 		}
 	} else {
-		fmt.Println("📦 Step 1: --no-clone 模式，跳过 clone")
+		fmt.Println("Step 1: --no-clone mode, skip clone")
 		if _, err := os.Stat(cfg.localPath); os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "❌ 路径不存在: %s\n", cfg.localPath)
+			fmt.Fprintf(os.Stderr, "path does not exist: %s\n", cfg.localPath)
 			os.Exit(2)
 		}
 	}
 
 	// Step 2: wiki-init
 	fmt.Println()
-	fmt.Println("📂 Step 2: 初始化 wiki 结构")
+	fmt.Println("Step 2: initialize wiki structure")
 	if err := os.MkdirAll(cfg.localPath, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ 无法创建目录: %s\n", cfg.localPath)
+		fmt.Fprintf(os.Stderr, "cannot create directory: %s\n", cfg.localPath)
 		os.Exit(3)
 	}
 	if err := wiki.WriteFiles(cfg.localPath, cfg.projectName, cfg.domain, cfg.force, !cfg.local); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ wiki-init 失败: %v\n", err)
+		fmt.Fprintf(os.Stderr, "wiki-init failed: %v\n", err)
 		os.Exit(3)
 	}
 	fmt.Println()
-	fmt.Printf("✅ wiki-tools init 完成: %s\n", cfg.localPath)
-	fmt.Printf("   领域: %s\n", cfg.domain)
-	fmt.Printf("   目录: %d 个子目录\n", len(wiki.Dirs))
+	fmt.Printf("wiki-tools init completed: %s\n", cfg.localPath)
+	fmt.Printf("   domain: %s\n", cfg.domain)
+	fmt.Printf("   dirs: %d subdirectories\n", len(wiki.Dirs))
 
 	// Step 3: Git config
 	fmt.Println()
-	fmt.Println("🔧 Step 3: Git 配置")
+	fmt.Println("Step 3: Git config")
 	if !git.IsRepo(cfg.localPath) {
 		if err := git.Init(cfg.localPath); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ git init 失败: %v\n", err)
+			fmt.Fprintf(os.Stderr, "git init failed: %v\n", err)
 			os.Exit(3)
 		}
-		fmt.Println("   📌 git init")
+		fmt.Println("   git init")
 	}
 	currentRemote, err := git.RemoteGetURL(cfg.localPath)
 	if err != nil {
 		_ = git.RemoteAdd(cfg.localPath, cfg.remoteURL)
-		fmt.Println("   📌 git remote add origin")
+		fmt.Println("   git remote add origin")
 	} else if currentRemote != cfg.remoteURL {
 		_ = git.RemoteSetURL(cfg.localPath, cfg.remoteURL)
-		fmt.Println("   📌 git remote set-url origin")
+		fmt.Println("   git remote set-url origin")
 	}
 	_ = git.SetConfig(cfg.localPath, "user.name", cfg.committerName)
 	_ = git.SetConfig(cfg.localPath, "user.email", cfg.committerEmail)
-	fmt.Printf("   👤 %s <%s>\n", cfg.committerName, cfg.committerEmail)
+	fmt.Printf("   %s <%s>\n", cfg.committerName, cfg.committerEmail)
 
 	if cfg.token != "" {
 		host := extractHost(cfg.remoteURL)
@@ -323,19 +344,21 @@ func bootstrapCmd(args []string) {
 			}
 			writeCredential(proto, host, cfg.token)
 			_ = git.SetConfigGlobal("credential.helper", "store")
-			fmt.Println("   🔑 Token 已写入 ~/.git-credentials （仅本机可见）")
+			fmt.Println("   token written to ~/.git-credentials")
 		} else {
-			fmt.Println("   ⚠️  无法从 REMOTE_URL 提取主机名，跳过 token 配置")
+			fmt.Println("   could not extract host from URL, skip token config")
 		}
-	} else if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".git-credentials")); err == nil {
-		_ = git.SetConfigGlobal("credential.helper", "store")
-		fmt.Println("   🔑 credential.helper = store（已存在）")
+	} else if home, err := os.UserHomeDir(); err == nil {
+		if _, err := os.Stat(filepath.Join(home, ".git-credentials")); err == nil {
+			_ = git.SetConfigGlobal("credential.helper", "store")
+			fmt.Println("   credential.helper = store (exists)")
+		}
 	}
-	fmt.Println("   ✅ Git 配置完成")
+	fmt.Println("   Git config completed")
 
 	// Step 4: Initial sync
 	fmt.Println()
-	fmt.Println("🚀 Step 4: 初始同步")
+	fmt.Println("Step 4: initial sync")
 	defaultBranch := git.DefaultBranch(cfg.localPath)
 	currentBranch, _ := git.CurrentBranch(cfg.localPath)
 	pullBranch := currentBranch
@@ -343,7 +366,7 @@ func bootstrapCmd(args []string) {
 		pullBranch = defaultBranch
 	}
 	if err := git.PullRebase(cfg.localPath, pullBranch); err != nil {
-		fmt.Println("   ℹ️  无远程内容或拉取失败（首次推送时会自动处理）")
+		fmt.Println("   no remote content or pull failed (will auto-push on first sync)")
 	}
 	if err := runSync(syncParams{
 		repoPath:       cfg.localPath,
@@ -351,37 +374,37 @@ func bootstrapCmd(args []string) {
 		committerEmail: cfg.committerEmail,
 		targetBranch:   currentBranch,
 	}); err != nil {
-		fmt.Printf("   ⚠️  初始同步跳过: %v\n", err)
+		fmt.Printf("   initial sync skipped: %v\n", err)
 	}
 
 	// Step 5: Daemon
 	fmt.Println()
 	if !cfg.noServe && cfg.syncInterval > 0 {
-		fmt.Printf("⏰ Step 5: 定时同步守护进程（每 %d 分钟）\n", cfg.syncInterval)
+		fmt.Printf("Step 5: periodic sync daemon (every %d min)\n", cfg.syncInterval)
 		fmt.Println()
-		fmt.Println("   💡 运行以下命令启动守护进程:")
+		fmt.Println("   start daemon:")
 		fmt.Printf("      wiki-tools serve %s --interval %d\n", cfg.localPath, cfg.syncInterval)
 		fmt.Println()
-		fmt.Println("   💡 或在后台运行:")
+		fmt.Println("   or in background:")
 		fmt.Printf("      nohup wiki-tools serve %s --interval %d &\n", cfg.localPath, cfg.syncInterval)
 	} else {
-		fmt.Println("⏰ Step 5: 跳过定时同步（--no-serve 或 sync-interval=0）")
+		fmt.Println("Step 5: skip periodic sync (--no-serve or sync-interval=0)")
 	}
 
 	// Completion
 	fmt.Println()
 	fmt.Println("╔════════════════════════════════════════════════════════╗")
-	fmt.Println("║                 ✅ 安装完成！                           ║")
+	fmt.Println("║                 setup complete!                        ║")
 	fmt.Println("╚════════════════════════════════════════════════════════╝")
 	fmt.Println()
-	fmt.Printf("  📂 知识库路径:   %s\n", cfg.localPath)
-	fmt.Printf("  🌐 远程仓库:     %s\n", cfg.remoteURL)
-	fmt.Printf("  📋 SCHEMA:       %s/SCHEMA.md\n", cfg.localPath)
+	fmt.Printf("  wiki path:    %s\n", cfg.localPath)
+	fmt.Printf("  remote:       %s\n", cfg.remoteURL)
+	fmt.Printf("  SCHEMA:       %s/SCHEMA.md\n", cfg.localPath)
 	fmt.Println()
-	fmt.Println("  命令速查：")
-	fmt.Printf("    wiki-tools sync %s              # 手动同步一次\n", cfg.localPath)
-	fmt.Printf("    wiki-tools init %s \"描述\"       # 重新初始化结构\n", cfg.localPath)
-	fmt.Printf("    wiki-tools serve %s              # 启动定时同步\n", cfg.localPath)
+	fmt.Println("  quick reference:")
+	fmt.Printf("    wiki-tools sync %s              # manual sync\n", cfg.localPath)
+	fmt.Printf("    wiki-tools init %s \"desc\"       # re-init structure\n", cfg.localPath)
+	fmt.Printf("    wiki-tools serve %s              # start daemon\n", cfg.localPath)
 	fmt.Println()
 }
 
@@ -418,11 +441,14 @@ func writeCredential(proto, host, token string) {
 				newLines = append(newLines, line)
 			}
 		}
-		content = []byte(strings.Join(newLines, "\n"))
-		if len(newLines) > 0 {
-			content = append(content, '\n')
+		f, err := os.Create(credsFile)
+		if err != nil {
+			return
 		}
-		os.WriteFile(credsFile, content, 0600)
+		for _, line := range newLines {
+			fmt.Fprintln(f, line)
+		}
+		f.Close()
 	}
 
 	f, err := os.OpenFile(credsFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)

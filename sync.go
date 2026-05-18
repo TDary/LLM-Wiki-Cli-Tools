@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -29,13 +30,13 @@ func syncCmd(args []string) {
 	}
 
 	flags := flag.NewFlagSet("sync", flag.ExitOnError)
-	rebase := flags.Bool("rebase", false, "推送前先 git pull --rebase")
-	dryRun := flags.Bool("dry-run", false, "只检查不执行")
-	name := flags.String("name", "", "提交者名字")
-	email := flags.String("email", "", "提交者邮箱")
-	branch := flags.String("branch", "", "推送目标分支")
-	message := flags.String("message", "", "commit message 模板，支持 {timestamp} 占位符")
-	forcePush := flags.Bool("force-push", false, "推送失败时尝试 --force-with-lease")
+	rebase := flags.Bool("rebase", false, "push before pull --rebase")
+	dryRun := flags.Bool("dry-run", false, "preview only")
+	name := flags.String("name", "", "committer name")
+	email := flags.String("email", "", "committer email")
+	branch := flags.String("branch", "", "target branch")
+	message := flags.String("message", "", "commit message template, {timestamp} placeholder supported")
+	forcePush := flags.Bool("force-push", false, "try force-with-lease on push failure")
 	flags.Usage = printSyncHelp
 	flags.Parse(args)
 
@@ -46,7 +47,7 @@ func syncCmd(args []string) {
 
 	var err error
 	if repoPath, err = absPath(repoPath); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ git-auto-sync: 路径不存在或无权限 → %s\n", repoPath)
+		fmt.Fprintf(os.Stderr, "git-auto-sync: path error: %s\n", repoPath)
 		os.Exit(3)
 	}
 
@@ -69,10 +70,10 @@ func syncCmd(args []string) {
 		rebase:         doRebase,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
-		if strings.Contains(err.Error(), "不是 Git 仓库") {
+		if errors.Is(err, git.ErrNotARepo) {
 			os.Exit(1)
 		}
-		if strings.Contains(err.Error(), "推送失败") {
+		if errors.Is(err, git.ErrPushFailed) {
 			os.Exit(2)
 		}
 		os.Exit(3)
@@ -81,21 +82,21 @@ func syncCmd(args []string) {
 
 func runSync(p syncParams) error {
 	if !git.IsRepo(p.repoPath) {
-		return fmt.Errorf("❌ git-auto-sync: 不是 Git 仓库 → %s", p.repoPath)
+		return fmt.Errorf("%w: %s", git.ErrNotARepo, p.repoPath)
 	}
 
 	status, err := git.StatusPorcelain(p.repoPath)
 	if err != nil {
-		return fmt.Errorf("❌ git-auto-sync: git status 失败: %w", err)
+		return fmt.Errorf("git-auto-sync: git status failed: %w", err)
 	}
 	if status == "" {
-		fmt.Printf("ℹ️  git-auto-sync: 无修改 [%s] — 跳过\n", p.repoPath)
+		fmt.Printf("git-auto-sync: no changes [%s] - skipping\n", p.repoPath)
 		return nil
 	}
 
 	if p.dryRun {
-		fmt.Printf("🔍 git-auto-sync: DRY RUN [%s]\n", p.repoPath)
-		fmt.Println("   待提交文件：")
+		fmt.Printf("git-auto-sync: DRY RUN [%s]\n", p.repoPath)
+		fmt.Println("   pending files:")
 		for _, line := range strings.Split(status, "\n") {
 			fmt.Printf("   %s\n", line)
 		}
@@ -112,23 +113,23 @@ func runSync(p syncParams) error {
 	}
 
 	if err := git.SetConfig(p.repoPath, "user.name", p.committerName); err != nil {
-		return fmt.Errorf("❌ git-auto-sync: 配置 user.name 失败: %w", err)
+		return fmt.Errorf("git-auto-sync: set user.name failed: %w", err)
 	}
 	if err := git.SetConfig(p.repoPath, "user.email", p.committerEmail); err != nil {
-		return fmt.Errorf("❌ git-auto-sync: 配置 user.email 失败: %w", err)
+		return fmt.Errorf("git-auto-sync: set user.email failed: %w", err)
 	}
 
 	if err := git.Add(p.repoPath); err != nil {
-		return fmt.Errorf("❌ git-auto-sync: git add 失败: %w", err)
+		return fmt.Errorf("git-auto-sync: git add failed: %w", err)
 	}
 
 	msg := buildCommitMsg(p.commitMsg)
 	committed, err := git.Commit(p.repoPath, msg)
 	if err != nil {
-		return fmt.Errorf("❌ git-auto-sync: git commit 失败: %w", err)
+		return fmt.Errorf("git-auto-sync: git commit failed: %w", err)
 	}
 	if !committed {
-		fmt.Printf("⚠️  git-auto-sync: 提交无变化 [%s]\n", p.repoPath)
+		fmt.Printf("git-auto-sync: commit had no effect [%s]\n", p.repoPath)
 		return nil
 	}
 
@@ -141,33 +142,33 @@ func runSync(p syncParams) error {
 	if branch == "" {
 		branch, err = git.CurrentBranch(p.repoPath)
 		if err != nil {
-			return fmt.Errorf("❌ git-auto-sync: 无法确定当前分支: %w", err)
+			return fmt.Errorf("git-auto-sync: cannot determine current branch: %w", err)
 		}
 	}
 	currentBranch, _ := git.CurrentBranch(p.repoPath)
 	if branch != currentBranch && currentBranch != "" {
-		return fmt.Errorf("❌ git-auto-sync: 当前分支 (%s) ≠ 目标分支 (%s)，请先切换分支", currentBranch, branch)
+		return fmt.Errorf("git-auto-sync: current branch (%s) != target branch (%s), switch branch first", currentBranch, branch)
 	}
 
 	if p.rebase {
 		if err := git.PullRebase(p.repoPath, branch); err != nil {
-			fmt.Printf("   ℹ️  pull --rebase 失败，继续尝试推送...\n")
+			fmt.Printf("   pull --rebase failed, continuing to push...\n")
 		}
 	}
 
 	if err := git.Push(p.repoPath, branch); err != nil {
 		if p.forcePush {
-			fmt.Println("⚠️  git-auto-sync: 普通推送失败，尝试 --force-with-lease...")
+			fmt.Println("git-auto-sync: push failed, trying --force-with-lease...")
 			if err2 := git.PushForceLease(p.repoPath, branch); err2 != nil {
-				return fmt.Errorf("❌ git-auto-sync: 推送失败 [%s]: %w", p.repoPath, err2)
+				return fmt.Errorf("%w: %s: %w", git.ErrPushFailed, p.repoPath, err2)
 			}
-			fmt.Printf("✅ git-auto-sync: %s → origin/%s (force-with-lease) [%s]\n", shortHash, branch, p.repoPath)
+			fmt.Printf("git-auto-sync: %s -> origin/%s (force-with-lease) [%s]\n", shortHash, branch, p.repoPath)
 			return nil
 		}
-		return fmt.Errorf("❌ git-auto-sync: 推送失败 [%s]: %w", p.repoPath, err)
+		return fmt.Errorf("%w: %s: %w", git.ErrPushFailed, p.repoPath, err)
 	}
 
-	fmt.Printf("✅ git-auto-sync: %s → origin/%s [%s]\n", shortHash, branch, p.repoPath)
+	fmt.Printf("git-auto-sync: %s -> origin/%s [%s]\n", shortHash, branch, p.repoPath)
 	return nil
 }
 
@@ -185,6 +186,7 @@ func printSyncHelp() {
 	fmt.Println("  --message     commit message 模板，支持 {timestamp}")
 	fmt.Println("  --force-push  推送失败时尝试 --force-with-lease")
 	fmt.Println("  -h, --help    显示帮助")
+	fmt.Println("  --version     显示版本")
 	fmt.Println()
 	fmt.Println("环境变量（flag 优先级更高）:")
 	fmt.Println("  GIT_SYNC_NAME, GIT_SYNC_EMAIL, GIT_SYNC_BRANCH")

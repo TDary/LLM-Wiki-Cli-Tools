@@ -205,11 +205,3 @@ func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
-
-// AbsPath resolves a path to absolute.
-func AbsPath(p string) (string, error) {
-	if p == "" || p == "." {
-		return os.Getwd()
-	}
-	return filepath.Abs(p)
-}

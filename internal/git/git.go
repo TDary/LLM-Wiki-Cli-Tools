@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,12 @@ import (
 )
 
 const timeout = 120 * time.Second
+
+// Sentinel errors for exit-code dispatch.
+var (
+	ErrNotARepo  = errors.New("not a git repository")
+	ErrPushFailed = errors.New("push failed")
+)
 
 func run(ctx context.Context, dir string, args ...string) (string, error) {
 	if ctx == nil {
@@ -24,6 +31,7 @@ func run(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",
 		"GCM_INTERACTIVE=never",
+		"LC_ALL=C",
 	)
 
 	out, err := cmd.Output()
@@ -34,25 +42,6 @@ func run(ctx context.Context, dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, out)
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-func runStderr(dir string, args ...string) (string, string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GCM_INTERACTIVE=never",
-	)
-
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
 
 // IsRepo checks if path is a git repository.
