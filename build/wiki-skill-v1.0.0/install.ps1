@@ -1,5 +1,5 @@
 param(
-    [switch]$Local,
+    [switch]$Full,
     [string]$Dir = "$env:USERPROFILE\.local\bin",
     [string]$Skill,
     [string]$Agents
@@ -10,7 +10,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DistDir = Join-Path $ScriptDir "dist"
 
 $BinName = "wiki-tools.exe"
-$Binary = if ($Local) { "wiki-tools-local-windows-amd64.exe" } else { "wiki-tools-windows-amd64.exe" }
+$Binary = if ($Full) { "wiki-tools-windows-amd64.exe" } else { "wiki-tools-local-windows-amd64.exe" }
 $Src = Join-Path $DistDir $Binary
 
 if (-not (Test-Path $Src)) {
@@ -25,7 +25,8 @@ New-Item -ItemType Directory -Force -Path $Dir | Out-Null
 $Dst = Join-Path $Dir $BinName
 Copy-Item -Force $Src $Dst
 
-Write-Host "Installed: $Dst"
+$Variant = if ($Full) { "full" } else { "local-only" }
+Write-Host "Installed: $Dst ($Variant)"
 
 # PATH
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")

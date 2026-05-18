@@ -14,18 +14,18 @@ AI-native wiki management with structured directories, cross-references, and opt
 .\install.ps1
 ```
 
-This auto-detects your platform, picks the right binary, copies it to `~/.local/bin` (or `/usr/local/bin` on macOS), and adds it to PATH.
+Auto-detects platform, installs to `~/.local/bin` (macOS: `/usr/local/bin`), adds to PATH.
 
-For the local-only variant (no Git dependency):
+**Defaults to local-only variant** (init + bootstrap, zero dependencies, ~2.7MB). For the full variant with Git support:
 
 ```bash
-./install.sh --local
+./install.sh --full
 ```
 
-To also install the skill into a Claude Code project:
+Install everything at once — binary, skill, and AGENTS.md:
 
 ```bash
-./install.sh --skill ~/my-project
+./install.sh --skill ~/my-project --agents ~/my-project
 ```
 
 ### Manual: Native Skill (zero dependencies)

@@ -4,25 +4,26 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DIST_DIR="$SCRIPT_DIR/dist"
 BIN_NAME="wiki-tools"
-LOCAL=false
+FULL=false
 TARGET_DIR=""
 SKILL_TARGET=""
 AGENTS_TARGET=""
 
 usage() {
-    echo "Usage: ./install.sh [--local] [--dir PATH] [--skill PROJECT_PATH] [--agents PROJECT_PATH]"
+    echo "Usage: ./install.sh [--full] [--dir PATH] [--skill PROJECT_PATH] [--agents PROJECT_PATH]"
     echo ""
-    echo "  --local          Install the local-only variant (no Git dependency)"
-    echo "  --dir PATH       Install binary to PATH (default: ~/.local/bin, macOS: /usr/local/bin)"
-    echo "  --skill PATH     Also copy the skill file to project/.claude/skills/"
-    echo "  --agents PATH    Also copy AGENTS.md to project root (for Copilot/Cursor/Windsurf/OpenClaw)"
-    echo "  -h, --help       Show this help"
+    echo "  --full          Install the full variant (init, sync, bootstrap, serve — requires Git)"
+    echo "  --dir PATH      Install binary to PATH (default: ~/.local/bin, macOS: /usr/local/bin)"
+    echo "  --skill PATH    Also copy the skill file to project/.claude/skills/"
+    echo "  --agents PATH   Also copy AGENTS.md to project root (for Copilot/Cursor/Windsurf/OpenClaw)"
+    echo ""
+    echo "  Default: local-only variant (init, bootstrap) — zero dependencies, ~2.7MB"
     exit 0
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --local) LOCAL=true; shift ;;
+        --full) FULL=true; shift ;;
         --dir) TARGET_DIR="$2"; shift 2 ;;
         --skill) SKILL_TARGET="$2"; shift 2 ;;
         --agents) AGENTS_TARGET="$2"; shift 2 ;;
@@ -48,9 +49,9 @@ case "$ARCH" in
     *) echo "Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
-# Pick binary
-BINARY="wiki-tools-${GOOS}-${GOARCH}"
-$LOCAL && BINARY="wiki-tools-local-${GOOS}-${GOARCH}"
+# Pick binary — default to local-only
+BINARY="wiki-tools-local-${GOOS}-${GOARCH}"
+$FULL && BINARY="wiki-tools-${GOOS}-${GOARCH}"
 [[ "$GOOS" == "windows" ]] && BINARY="${BINARY}.exe" && BIN_NAME="${BIN_NAME}.exe"
 
 SRC="$DIST_DIR/$BINARY"
@@ -77,7 +78,7 @@ DST="$TARGET_DIR/$BIN_NAME"
 cp "$SRC" "$DST"
 chmod +x "$DST"
 
-echo "Installed: $DST"
+echo "Installed: $DST ($( [[ $FULL == true ]] && echo 'full' || echo 'local-only' ))"
 "$DST" --version 2>/dev/null || true
 
 # Check PATH
