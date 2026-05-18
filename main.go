@@ -9,6 +9,8 @@ import (
 
 const version = "0.2.0"
 
+var commands = map[string]func([]string){}
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -26,22 +28,13 @@ func main() {
 		os.Exit(0)
 	}
 
-	args := os.Args[2:]
-
-	switch cmd {
-	case "init":
-		initCmd(args)
-	case "sync":
-		syncCmd(args)
-	case "bootstrap":
-		bootstrapCmd(args)
-	case "serve":
-		serveCmd(args)
-	default:
+	handler, ok := commands[cmd]
+	if !ok {
 		fmt.Fprintf(os.Stderr, "❌ 未知命令: %s\n\n", cmd)
 		printUsage()
 		os.Exit(1)
 	}
+	handler(os.Args[2:])
 }
 
 func printUsage() {

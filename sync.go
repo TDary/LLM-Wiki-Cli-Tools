@@ -1,3 +1,5 @@
+//go:build !localonly
+
 package main
 
 import (
@@ -9,6 +11,8 @@ import (
 
 	"wiki-tools/internal/git"
 )
+
+func init() { commands["sync"] = syncCmd }
 
 type syncParams struct {
 	repoPath                      string

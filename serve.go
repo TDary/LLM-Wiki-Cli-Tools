@@ -1,3 +1,5 @@
+//go:build !localonly
+
 package main
 
 import (
@@ -11,6 +13,8 @@ import (
 
 	"wiki-tools/internal/git"
 )
+
+func init() { commands["serve"] = serveCmd }
 
 func serveCmd(args []string) {
 	for _, a := range args {

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"wiki-tools/internal/git"
 	"wiki-tools/internal/wiki"
 )
 
@@ -14,6 +13,10 @@ type initConfig struct {
 	wikiPath, domain, name string
 	noGit, force           bool
 }
+
+var gitInitFn func(string)
+
+func init() { commands["init"] = initCmd }
 
 func initCmd(args []string) {
 	for _, a := range args {
@@ -65,22 +68,11 @@ func initCmd(args []string) {
 		os.Exit(2)
 	}
 
-	if !cfg.noGit && !git.IsRepo(wikiPath) {
-		if err := git.Init(wikiPath); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ git init 失败: %v\n", err)
-			os.Exit(2)
-		}
-		if err := git.Add(wikiPath); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ git add 失败: %v\n", err)
-			os.Exit(2)
-		}
-		committed, err := git.Commit(wikiPath, "Initial commit via wiki-tools")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "❌ git commit 失败: %v\n", err)
-			os.Exit(2)
-		}
-		if committed {
-			fmt.Println("\n🔧 Git 仓库已初始化")
+	if !cfg.noGit {
+		if gitInitFn != nil {
+			gitInitFn(wikiPath)
+		} else {
+			fmt.Println("ℹ️  Git support not compiled in, skipping git init")
 		}
 	}
 
