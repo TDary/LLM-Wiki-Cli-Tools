@@ -63,7 +63,8 @@ func initCmd(args []string) {
 		os.Exit(2)
 	}
 
-	if err := wiki.WriteFiles(wikiPath, projectName, cfg.domain, cfg.force, !cfg.noGit); err != nil {
+	hasGit := !cfg.noGit && gitInitFn != nil
+	if err := wiki.WriteFiles(wikiPath, projectName, cfg.domain, cfg.force, hasGit); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
 		os.Exit(2)
 	}

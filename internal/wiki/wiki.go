@@ -137,13 +137,15 @@ func WriteFiles(path, name, domain string, force, git bool) error {
 		if err := os.MkdirAll(dirPath, 0755); err != nil {
 			return fmt.Errorf("创建目录 %s: %w", dir, err)
 		}
-		entries, _ := os.ReadDir(dirPath)
-		if len(entries) == 0 {
-			f, err := os.Create(filepath.Join(dirPath, ".gitkeep"))
-			if err != nil {
-				return fmt.Errorf("创建 .gitkeep: %w", err)
+		if git {
+			entries, _ := os.ReadDir(dirPath)
+			if len(entries) == 0 {
+				f, err := os.Create(filepath.Join(dirPath, ".gitkeep"))
+				if err != nil {
+					return fmt.Errorf("创建 .gitkeep: %w", err)
+				}
+				f.Close()
 			}
-			f.Close()
 		}
 	}
 
@@ -152,22 +154,24 @@ func WriteFiles(path, name, domain string, force, git bool) error {
 		fmt.Printf("   %s/\n", dir)
 	}
 
-	// .gitignore
-	giPath := filepath.Join(path, ".gitignore")
-	if force || !FileExists(giPath) {
-		if err := os.WriteFile(giPath, []byte(gitignoreContent), 0644); err != nil {
-			return fmt.Errorf("写入 .gitignore: %w", err)
+	if git {
+		// .gitignore
+		giPath := filepath.Join(path, ".gitignore")
+		if force || !FileExists(giPath) {
+			if err := os.WriteFile(giPath, []byte(gitignoreContent), 0644); err != nil {
+				return fmt.Errorf("写入 .gitignore: %w", err)
+			}
+			fmt.Printf("📄 %s/.gitignore\n", name)
 		}
-		fmt.Printf("📄 %s/.gitignore\n", name)
-	}
 
-	// .gitattributes
-	gaPath := filepath.Join(path, ".gitattributes")
-	if force || !FileExists(gaPath) {
-		if err := os.WriteFile(gaPath, []byte(gitattributesContent), 0644); err != nil {
-			return fmt.Errorf("写入 .gitattributes: %w", err)
+		// .gitattributes
+		gaPath := filepath.Join(path, ".gitattributes")
+		if force || !FileExists(gaPath) {
+			if err := os.WriteFile(gaPath, []byte(gitattributesContent), 0644); err != nil {
+				return fmt.Errorf("写入 .gitattributes: %w", err)
+			}
+			fmt.Printf("📄 %s/.gitattributes\n", name)
 		}
-		fmt.Printf("📄 %s/.gitattributes\n", name)
 	}
 
 	// SCHEMA.md
