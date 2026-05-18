@@ -32,10 +32,16 @@ func initCmd(args []string) {
 
 	cfg := parseInitArgs(args)
 
-	if cfg.wikiPath == "" || cfg.domain == "" {
-		fmt.Fprintln(os.Stderr, "❌ 缺少必要参数: WIKI_PATH 和 DOMAIN")
-		printInitHelp()
-		os.Exit(1)
+	if cfg.wikiPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cannot determine home directory: %v\n", err)
+			os.Exit(1)
+		}
+		cfg.wikiPath = filepath.Join(home, "wiki")
+	}
+	if cfg.domain == "" {
+		cfg.domain = "Wiki 知识库"
 	}
 
 	wikiPath := cfg.wikiPath
@@ -61,6 +67,14 @@ func initCmd(args []string) {
 	if err := os.MkdirAll(wikiPath, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ 无法创建目录: %s\n", wikiPath)
 		os.Exit(2)
+	}
+
+	// Detect existing wiki
+	schemaPath := filepath.Join(wikiPath, "SCHEMA.md")
+	if wiki.FileExists(schemaPath) && !cfg.force {
+		fmt.Printf("ℹ️  检测到已有知识库: %s\n", wikiPath)
+		fmt.Printf("   如需重新生成文件，请使用 --force\n")
+		os.Exit(0)
 	}
 
 	hasGit := !cfg.noGit && gitInitFn != nil
@@ -120,11 +134,11 @@ func parseInitArgs(args []string) initConfig {
 }
 
 func printInitHelp() {
-	fmt.Println("用法: wiki-tools init <WIKI_PATH> <DOMAIN> [OPTIONS]")
+	fmt.Println("用法: wiki-tools init [WIKI_PATH] [DOMAIN] [OPTIONS]")
 	fmt.Println()
 	fmt.Println("参数:")
-	fmt.Println("  WIKI_PATH    知识库本地路径（必须）")
-	fmt.Println("  DOMAIN       领域名称，写入 SCHEMA.md（必须）")
+	fmt.Println("  WIKI_PATH    知识库本地路径（默认: ~/wiki）")
+	fmt.Println("  DOMAIN       领域名称，写入 SCHEMA.md（默认: Wiki 知识库）")
 	fmt.Println()
 	fmt.Println("选项:")
 	fmt.Println("  --no-git     不初始化 Git 仓库")
@@ -134,7 +148,8 @@ func printInitHelp() {
 	fmt.Println("  --version    显示版本")
 	fmt.Println()
 	fmt.Println("示例:")
+	fmt.Println(`  wiki-tools init`)
 	fmt.Println(`  wiki-tools init ~/team-wiki "团队共享知识库"`)
-	fmt.Println(`  wiki-tools init ~/my-wiki "个人知识库" --name my-wiki`)
+	fmt.Println(`  wiki-tools init ~/my-wiki --name my-wiki`)
 	fmt.Println(`  wiki-tools init ~/wiki "实验项目" --force --no-git`)
 }

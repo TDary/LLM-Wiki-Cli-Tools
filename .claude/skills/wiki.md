@@ -19,16 +19,17 @@ Always read `SCHEMA.md` first when entering an existing wiki. Check the **Git �
 ## /wiki init
 
 ```
-/wiki init <path> <domain> [--no-git] [--force] [--name NAME]
+/wiki init [path] [domain] [--no-git] [--force] [--name NAME]
 ```
 
-Initialize a new wiki at `<path>` with the given domain description.
+Initialize a new wiki. If `path` is omitted, defaults to `~/wiki`. If `domain` is omitted, defaults to `"Wiki 知识库"`.
 
 ### Step-by-step
 
-1. Resolve `~` in path, convert to absolute path
-2. If `--name` not given, use `filepath.Base(path)`
-3. Create these directories:
+1. If path not given, default to `~/wiki`
+2. **Check if SCHEMA.md already exists** — if yes and `--force` not set, report "detected existing wiki" and exit (don't overwrite)
+3. If `--name` not given, use `filepath.Base(path)`. If domain not given, default to `"Wiki 知识库"`
+4. Create these directories:
    ```
    raw/  entities/  concepts/  relations/  queries/  drafts/
    ```
