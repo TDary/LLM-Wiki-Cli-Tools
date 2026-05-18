@@ -7,25 +7,27 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"wiki-tools/internal/git"
 )
 
 func serveCmd(args []string) {
+	for _, a := range args {
+		switch a {
+		case "-h", "--help":
+			printServeHelp()
+			os.Exit(0)
+		case "--version":
+			fmt.Println("wiki-tools v" + version)
+			os.Exit(0)
+		}
+	}
+
 	flags := flag.NewFlagSet("serve", flag.ExitOnError)
 	interval := flags.Int("interval", 10, "同步间隔（分钟）")
 	name := flags.String("name", "", "提交者名字")
 	email := flags.String("email", "", "提交者邮箱")
-	flags.Usage = func() {
-		fmt.Println("用法: wiki-tools serve <WIKI_PATH> [OPTIONS]")
-		fmt.Println()
-		fmt.Println("  启动定时同步守护进程。")
-		fmt.Println()
-		fmt.Println("选项:")
-		flags.PrintDefaults()
-		fmt.Println()
-		fmt.Println("示例:")
-		fmt.Println("  wiki-tools serve ~/team-wiki")
-		fmt.Println("  wiki-tools serve ~/team-wiki --interval 30")
-	}
+	flags.Usage = printServeHelp
 	flags.Parse(args)
 
 	if flags.NArg() < 1 {
@@ -40,13 +42,14 @@ func serveCmd(args []string) {
 		wikiPath = home + wikiPath[1:]
 	}
 
-	wikiPath, err := absPath(wikiPath)
+	var err error
+	wikiPath, err = absPath(wikiPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ 路径解析失败: %v\n", err)
 		os.Exit(3)
 	}
 
-	if !isGitRepo(wikiPath) {
+	if !git.IsRepo(wikiPath) {
 		fmt.Fprintf(os.Stderr, "❌ 不是 Git 仓库: %s\n", wikiPath)
 		os.Exit(1)
 	}
@@ -62,20 +65,15 @@ func serveCmd(args []string) {
 	fmt.Printf("   按 Ctrl+C 停止\n")
 	fmt.Println()
 
-	// 首次立即同步
 	fmt.Printf("[%s] 执行首次同步...\n", timestamp())
 	if err := runSync(syncParams{
 		repoPath:       wikiPath,
 		committerName:  committerName,
 		committerEmail: committerEmail,
-		dryRun:         false,
-		forcePush:      false,
-		rebase:         false,
 	}); err != nil {
 		fmt.Printf("   ⚠️  同步出错: %v\n", err)
 	}
 
-	// 定时器
 	ticker := time.NewTicker(duration)
 	defer ticker.Stop()
 
@@ -90,9 +88,6 @@ func serveCmd(args []string) {
 				repoPath:       wikiPath,
 				committerName:  committerName,
 				committerEmail: committerEmail,
-				dryRun:         false,
-				forcePush:      false,
-				rebase:         false,
 			}); err != nil {
 				fmt.Printf("   ⚠️  同步出错: %v\n", err)
 			}
@@ -101,4 +96,19 @@ func serveCmd(args []string) {
 			return
 		}
 	}
+}
+
+func printServeHelp() {
+	fmt.Println("用法: wiki-tools serve <WIKI_PATH> [OPTIONS]")
+	fmt.Println()
+	fmt.Println("  启动定时同步守护进程。")
+	fmt.Println()
+	fmt.Println("选项:")
+	fmt.Println("  --interval N  同步间隔（分钟，默认 10）")
+	fmt.Println("  --name NAME   提交者名字")
+	fmt.Println("  --email E     提交者邮箱")
+	fmt.Println()
+	fmt.Println("示例:")
+	fmt.Println("  wiki-tools serve ~/team-wiki")
+	fmt.Println("  wiki-tools serve ~/team-wiki --interval 30")
 }

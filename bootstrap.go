@@ -8,22 +8,25 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"wiki-tools/internal/git"
+	"wiki-tools/internal/wiki"
 )
 
 type bootstrapConfig struct {
-	remoteURL, localPath       string
-	name, domain               string
-	syncInterval               int
+	remoteURL, localPath          string
+	name, domain                  string
+	syncInterval                  int
 	committerName, committerEmail string
-	noServe, noClone, force    bool
-	token, projectName         string
+	noServe, noClone, force       bool
+	token, projectName            string
 }
 
 func parseBootstrapArgs(args []string) bootstrapConfig {
 	cfg := bootstrapConfig{
-		domain:       "LLM Wiki 知识库",
-		syncInterval: 10,
-		committerName: "AI Assistant",
+		domain:         "LLM Wiki 知识库",
+		syncInterval:   10,
+		committerName:  "AI Assistant",
 		committerEmail: "ai@local",
 	}
 
@@ -67,7 +70,6 @@ func parseBootstrapArgs(args []string) bootstrapConfig {
 		i++
 	}
 
-	// Default local path
 	if cfg.localPath == "" && cfg.remoteURL != "" {
 		repoBase := filepath.Base(cfg.remoteURL)
 		repoBase = strings.TrimSuffix(repoBase, ".git")
@@ -119,7 +121,7 @@ func dryRunBootstrap(args []string) {
 	fmt.Println()
 	fmt.Println("  将执行的操作：")
 	if !cfg.noClone {
-		if isGitRepo(cfg.localPath) {
+		if git.IsRepo(cfg.localPath) {
 			fmt.Println("    📦 Step 1: 检测到已有 Git 仓库，跳过 clone")
 		} else if _, err := os.Stat(cfg.localPath); err == nil {
 			fmt.Println("    📦 Step 1: 目录已存在，继续初始化")
@@ -139,7 +141,6 @@ func dryRunBootstrap(args []string) {
 }
 
 func bootstrapCmd(args []string) {
-	// Handle flags that can appear anywhere
 	for _, a := range args {
 		switch a {
 		case "-h", "--help":
@@ -162,7 +163,6 @@ func bootstrapCmd(args []string) {
 		os.Exit(1)
 	}
 
-	// Header
 	fmt.Println()
 	fmt.Println("╔════════════════════════════════════════════════════════╗")
 	fmt.Println("║          wiki-tools bootstrap · 一键安装知识库        ║")
@@ -181,9 +181,9 @@ func bootstrapCmd(args []string) {
 
 	// Step 1: Clone or verify
 	if !cfg.noClone {
-		if isGitRepo(cfg.localPath) {
+		if git.IsRepo(cfg.localPath) {
 			fmt.Println("📦 Step 1: 检测到已有 Git 仓库，跳过 clone")
-			_ = gitFetch(cfg.localPath)
+			_ = git.Fetch(cfg.localPath)
 		} else if _, err := os.Stat(cfg.localPath); err == nil {
 			fmt.Println("📦 Step 1: 目录已存在但非 Git 仓库")
 			entries, _ := os.ReadDir(cfg.localPath)
@@ -192,11 +192,11 @@ func bootstrapCmd(args []string) {
 			}
 		} else {
 			fmt.Printf("📦 Step 1: git clone %s → %s\n", cfg.remoteURL, cfg.localPath)
-			if err := gitClone(nil, cfg.remoteURL, cfg.localPath); err != nil {
+			if err := git.Clone(nil, cfg.remoteURL, cfg.localPath); err != nil {
 				fmt.Println("   ⚠️  clone 失败，将初始化本地仓库（可稍后手动关联远程）")
 				os.MkdirAll(cfg.localPath, 0755)
-				_ = gitInit(cfg.localPath)
-				_ = gitRemoteAdd(cfg.localPath, cfg.remoteURL)
+				_ = git.Init(cfg.localPath)
+				_ = git.RemoteAdd(cfg.localPath, cfg.remoteURL)
 			} else {
 				fmt.Println("   ✅ clone 成功")
 			}
@@ -216,38 +216,37 @@ func bootstrapCmd(args []string) {
 		fmt.Fprintf(os.Stderr, "❌ 无法创建目录: %s\n", cfg.localPath)
 		os.Exit(3)
 	}
-	if err := writeWikiFiles(cfg.localPath, cfg.projectName, cfg.domain, cfg.force); err != nil {
+	if err := wiki.WriteFiles(cfg.localPath, cfg.projectName, cfg.domain, cfg.force); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ wiki-init 失败: %v\n", err)
 		os.Exit(3)
 	}
 	fmt.Println()
 	fmt.Printf("✅ wiki-tools init 完成: %s\n", cfg.localPath)
 	fmt.Printf("   领域: %s\n", cfg.domain)
-	fmt.Printf("   目录: %d 个子目录\n", len(wikiDirs))
+	fmt.Printf("   目录: %d 个子目录\n", len(wiki.Dirs))
 
 	// Step 3: Git config
 	fmt.Println()
 	fmt.Println("🔧 Step 3: Git 配置")
-	if !isGitRepo(cfg.localPath) {
-		if err := gitInit(cfg.localPath); err != nil {
+	if !git.IsRepo(cfg.localPath) {
+		if err := git.Init(cfg.localPath); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ git init 失败: %v\n", err)
 			os.Exit(3)
 		}
 		fmt.Println("   📌 git init")
 	}
-	currentRemote, err := gitRemoteGetURL(cfg.localPath)
+	currentRemote, err := git.RemoteGetURL(cfg.localPath)
 	if err != nil {
-		_ = gitRemoteAdd(cfg.localPath, cfg.remoteURL)
+		_ = git.RemoteAdd(cfg.localPath, cfg.remoteURL)
 		fmt.Println("   📌 git remote add origin")
 	} else if currentRemote != cfg.remoteURL {
-		_ = gitRemoteSetURL(cfg.localPath, cfg.remoteURL)
+		_ = git.RemoteSetURL(cfg.localPath, cfg.remoteURL)
 		fmt.Println("   📌 git remote set-url origin")
 	}
-	_ = gitSetConfig(cfg.localPath, "user.name", cfg.committerName)
-	_ = gitSetConfig(cfg.localPath, "user.email", cfg.committerEmail)
+	_ = git.SetConfig(cfg.localPath, "user.name", cfg.committerName)
+	_ = git.SetConfig(cfg.localPath, "user.email", cfg.committerEmail)
 	fmt.Printf("   👤 %s <%s>\n", cfg.committerName, cfg.committerEmail)
 
-	// Configure credential
 	if cfg.token != "" {
 		host := extractHost(cfg.remoteURL)
 		if host != "" {
@@ -256,13 +255,13 @@ func bootstrapCmd(args []string) {
 				proto = "http"
 			}
 			writeCredential(proto, host, cfg.token)
-			_ = gitSetConfigGlobal("credential.helper", "store")
+			_ = git.SetConfigGlobal("credential.helper", "store")
 			fmt.Println("   🔑 Token 已写入 ~/.git-credentials （仅本机可见）")
 		} else {
 			fmt.Println("   ⚠️  无法从 REMOTE_URL 提取主机名，跳过 token 配置")
 		}
 	} else if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".git-credentials")); err == nil {
-		_ = gitSetConfigGlobal("credential.helper", "store")
+		_ = git.SetConfigGlobal("credential.helper", "store")
 		fmt.Println("   🔑 credential.helper = store（已存在）")
 	}
 	fmt.Println("   ✅ Git 配置完成")
@@ -270,13 +269,13 @@ func bootstrapCmd(args []string) {
 	// Step 4: Initial sync
 	fmt.Println()
 	fmt.Println("🚀 Step 4: 初始同步")
-	defaultBranch := gitDefaultBranch(cfg.localPath)
-	currentBranch, _ := gitCurrentBranch(cfg.localPath)
+	defaultBranch := git.DefaultBranch(cfg.localPath)
+	currentBranch, _ := git.CurrentBranch(cfg.localPath)
 	pullBranch := currentBranch
 	if pullBranch == "" {
 		pullBranch = defaultBranch
 	}
-	if err := gitPullRebase(cfg.localPath, pullBranch); err != nil {
+	if err := git.PullRebase(cfg.localPath, pullBranch); err != nil {
 		fmt.Println("   ℹ️  无远程内容或拉取失败（首次推送时会自动处理）")
 	}
 	if err := runSync(syncParams{

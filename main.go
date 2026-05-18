@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -16,7 +17,6 @@ func main() {
 
 	cmd := os.Args[1]
 
-	// Handle top-level flags
 	switch cmd {
 	case "-h", "--help":
 		printUsage()
@@ -88,5 +88,13 @@ func timestamp() string {
 	return time.Now().Format("2006-01-02 15:04:05")
 }
 
-// Ensure git.go funcs used correctly
-var _ = gitClone
+func absPath(p string) (string, error) {
+	if p == "" || p == "." {
+		return os.Getwd()
+	}
+	if p[0] == '~' {
+		home, _ := os.UserHomeDir()
+		p = filepath.Join(home, p[1:])
+	}
+	return filepath.Abs(p)
+}

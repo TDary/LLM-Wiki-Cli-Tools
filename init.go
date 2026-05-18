@@ -5,10 +5,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"wiki-tools/internal/git"
+	"wiki-tools/internal/wiki"
 )
 
+type initConfig struct {
+	wikiPath, domain, name string
+	noGit, force           bool
+}
+
 func initCmd(args []string) {
-	// Handle flags that can appear anywhere
 	for _, a := range args {
 		switch a {
 		case "-h", "--help":
@@ -28,13 +35,12 @@ func initCmd(args []string) {
 		os.Exit(1)
 	}
 
-	// Resolve path
 	wikiPath := cfg.wikiPath
 	if wikiPath[0] == '~' {
 		home, _ := os.UserHomeDir()
 		wikiPath = filepath.Join(home, wikiPath[1:])
 	}
-	wikiPath, err := absPath(wikiPath)
+	wikiPath, err := wiki.AbsPath(wikiPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ 路径解析失败: %v\n", err)
 		os.Exit(2)
@@ -45,28 +51,26 @@ func initCmd(args []string) {
 		projectName = filepath.Base(wikiPath)
 	}
 
-	// Create directories and files
 	if err := os.MkdirAll(wikiPath, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ 无法创建目录: %s\n", wikiPath)
 		os.Exit(2)
 	}
 
-	if err := writeWikiFiles(wikiPath, projectName, cfg.domain, cfg.force); err != nil {
+	if err := wiki.WriteFiles(wikiPath, projectName, cfg.domain, cfg.force); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
 		os.Exit(2)
 	}
 
-	// Git init
-	if !cfg.noGit && !isGitRepo(wikiPath) {
-		if err := gitInit(wikiPath); err != nil {
+	if !cfg.noGit && !git.IsRepo(wikiPath) {
+		if err := git.Init(wikiPath); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ git init 失败: %v\n", err)
 			os.Exit(2)
 		}
-		if err := gitAdd(wikiPath); err != nil {
+		if err := git.Add(wikiPath); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ git add 失败: %v\n", err)
 			os.Exit(2)
 		}
-		committed, err := gitCommit(wikiPath, "Initial commit: wiki-tools init bootstrap")
+		committed, err := git.Commit(wikiPath, "Initial commit: wiki-tools init bootstrap")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "❌ git commit 失败: %v\n", err)
 			os.Exit(2)
@@ -79,16 +83,11 @@ func initCmd(args []string) {
 	fmt.Println()
 	fmt.Printf("✅ wiki-tools init 完成: %s\n", wikiPath)
 	fmt.Printf("   领域: %s\n", cfg.domain)
-	fmt.Printf("   目录: %d 个子目录\n", len(wikiDirs))
+	fmt.Printf("   目录: %d 个子目录\n", len(wiki.Dirs))
 	fmt.Println()
 	fmt.Println("下一步：")
 	fmt.Printf("   wiki-tools bootstrap <remote-url> %s    # 绑定远程仓库并配置自动同步\n", wikiPath)
 	fmt.Println("   或手动: git remote add origin <url> && git push -u origin main")
-}
-
-type initConfig struct {
-	wikiPath, domain, name string
-	noGit, force           bool
 }
 
 func parseInitArgs(args []string) initConfig {

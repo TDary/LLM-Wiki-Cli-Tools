@@ -1,4 +1,4 @@
-package main
+package wiki
 
 import (
 	"fmt"
@@ -43,7 +43,7 @@ const gitattributesContent = `# LLM Wiki — Gitattributes
 *.yaml text eol=lf
 `
 
-func generateSCHEMA(path, name, domain string) string {
+func generateSCHEMA(name, domain string) string {
 	return fmt.Sprintf(`# SCHEMA — %s
 
 > 知识库领域配置 · 自动生成的索引和关系
@@ -122,16 +122,16 @@ func generateLog() string {
 `, time.Now().Format("2006-01-02"))
 }
 
-var wikiDirs = []string{"raw", "entities", "concepts", "relations", "queries", "drafts"}
+// Dirs is the list of wiki subdirectories.
+var Dirs = []string{"raw", "entities", "concepts", "relations", "queries", "drafts"}
 
-func writeWikiFiles(path, name, domain string, force bool) error {
-	// 创建目录结构
-	for _, dir := range wikiDirs {
+// WriteFiles creates the wiki directory structure and skeleton files.
+func WriteFiles(path, name, domain string, force bool) error {
+	for _, dir := range Dirs {
 		dirPath := filepath.Join(path, dir)
 		if err := os.MkdirAll(dirPath, 0755); err != nil {
 			return fmt.Errorf("创建目录 %s: %w", dir, err)
 		}
-		// 空目录放 .gitkeep
 		entries, _ := os.ReadDir(dirPath)
 		if len(entries) == 0 {
 			f, err := os.Create(filepath.Join(dirPath, ".gitkeep"))
@@ -143,13 +143,13 @@ func writeWikiFiles(path, name, domain string, force bool) error {
 	}
 
 	fmt.Println("📁 目录结构已创建:")
-	for _, dir := range wikiDirs {
+	for _, dir := range Dirs {
 		fmt.Printf("   %s/\n", dir)
 	}
 
 	// .gitignore
 	giPath := filepath.Join(path, ".gitignore")
-	if force || !fileExists(giPath) {
+	if force || !FileExists(giPath) {
 		if err := os.WriteFile(giPath, []byte(gitignoreContent), 0644); err != nil {
 			return fmt.Errorf("写入 .gitignore: %w", err)
 		}
@@ -158,7 +158,7 @@ func writeWikiFiles(path, name, domain string, force bool) error {
 
 	// .gitattributes
 	gaPath := filepath.Join(path, ".gitattributes")
-	if force || !fileExists(gaPath) {
+	if force || !FileExists(gaPath) {
 		if err := os.WriteFile(gaPath, []byte(gitattributesContent), 0644); err != nil {
 			return fmt.Errorf("写入 .gitattributes: %w", err)
 		}
@@ -167,8 +167,8 @@ func writeWikiFiles(path, name, domain string, force bool) error {
 
 	// SCHEMA.md
 	schemaPath := filepath.Join(path, "SCHEMA.md")
-	if force || !fileExists(schemaPath) {
-		if err := os.WriteFile(schemaPath, []byte(generateSCHEMA(path, name, domain)), 0644); err != nil {
+	if force || !FileExists(schemaPath) {
+		if err := os.WriteFile(schemaPath, []byte(generateSCHEMA(name, domain)), 0644); err != nil {
 			return fmt.Errorf("写入 SCHEMA.md: %w", err)
 		}
 		fmt.Printf("📄 %s/SCHEMA.md\n", name)
@@ -176,7 +176,7 @@ func writeWikiFiles(path, name, domain string, force bool) error {
 
 	// README.md
 	readmePath := filepath.Join(path, "README.md")
-	if force || !fileExists(readmePath) {
+	if force || !FileExists(readmePath) {
 		if err := os.WriteFile(readmePath, []byte(generateREADME(name, domain)), 0644); err != nil {
 			return fmt.Errorf("写入 README.md: %w", err)
 		}
@@ -185,7 +185,7 @@ func writeWikiFiles(path, name, domain string, force bool) error {
 
 	// log.md
 	logPath := filepath.Join(path, "log.md")
-	if force || !fileExists(logPath) {
+	if force || !FileExists(logPath) {
 		if err := os.WriteFile(logPath, []byte(generateLog()), 0644); err != nil {
 			return fmt.Errorf("写入 log.md: %w", err)
 		}
@@ -195,12 +195,14 @@ func writeWikiFiles(path, name, domain string, force bool) error {
 	return nil
 }
 
-func fileExists(path string) bool {
+// FileExists checks whether a file exists.
+func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
 
-func absPath(p string) (string, error) {
+// AbsPath resolves a path to absolute.
+func AbsPath(p string) (string, error) {
 	if p == "" || p == "." {
 		return os.Getwd()
 	}

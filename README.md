@@ -174,6 +174,30 @@ GOOS=darwin  GOARCH=arm64 go build -o dist/wiki-tools-darwin-arm64 .
 
 ---
 
+## 工程结构
+
+```text
+wiki-cli-tools/
+├── main.go                    # 入口 + 命令路由
+├── go.mod
+├── init.go                    # init 命令
+├── sync.go                    # sync 命令 + 同步核心逻辑
+├── bootstrap.go               # bootstrap 命令
+├── serve.go                   # serve 守护进程
+├── internal/
+│   ├── git/
+│   │   └── git.go             # Git 操作封装
+│   └── wiki/
+│       └── wiki.go            # Wiki 内容生成器
+├── platform-adapters/
+│   ├── CLAUDE.md              # Claude Code 适配配置
+│   └── AGENTS.md              # OpenClaw / Cursor / Copilot 适配
+├── dist/                      # 跨平台预编译二进制
+└── README.md
+```
+
+---
+
 ## 文件规范
 
 - 文件名：小写 + 连字符（`transformer-architecture.md`）
