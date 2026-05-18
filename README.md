@@ -62,8 +62,10 @@ wiki-tools bootstrap git@your-git-server.com:team/wiki.git ~/team-wiki \
 ### `bootstrap` — 一键安装（核心入口）
 
 ```bash
-wiki-tools bootstrap <REMOTE_URL> [LOCAL_PATH] [OPTIONS]
+wiki-tools bootstrap [REMOTE_URL] [LOCAL_PATH] [OPTIONS]
 ```
+
+不传 URL 时自动切换为纯本地模式。
 
 | 选项 | 默认值 | 说明 |
 |------|--------|------|
@@ -76,7 +78,18 @@ wiki-tools bootstrap <REMOTE_URL> [LOCAL_PATH] [OPTIONS]
 | `--no-clone` | — | 跳过 clone，对已有目录配置 |
 | `--force` | — | 覆盖已存在的 SCHEMA.md |
 | `--token TOKEN` | — | Git 访问令牌，自动写入 `~/.git-credentials` |
+| `--local` | — | 纯本地模式（无 URL 时自动启用） |
 | `--dry-run` | — | 预览模式 |
+
+示例：
+
+```bash
+# Git 协作模式（传远程仓库 URL）
+wiki-tools bootstrap git@your-server.com:team/wiki.git ~/team-wiki
+
+# 纯本地模式（不传 URL 自动启用）
+wiki-tools bootstrap ~/my-wiki --domain "个人知识库"
+```
 
 ### `sync` — 自动提交 + 推送
 

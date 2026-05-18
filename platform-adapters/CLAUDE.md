@@ -55,13 +55,23 @@ team-wiki/
 └── drafts/          # Work in progress
 ```
 
+## Mode Detection
+
+Check `SCHEMA.md` first. The "Git 同步" field in the info table tells you what to do:
+
+| Git 同步 | Mode | Behavior |
+|-----------|------|----------|
+| `启用` | Git mode | `wiki-tools sync` after changes |
+| `禁用（纯本地模式）` | Local mode | Skip sync entirely — just read/write files directly |
+
 ## Conventions
 
 - File names: lowercase, hyphens (e.g., `transformer-architecture.md`)
 - Cross-reference with `[[wikilinks]]`
 - Every page must link to at least 2 other pages
 - Update `log.md` after every action
-- Use `wiki-tools sync` after modifications — never run raw `git push` directly
+- Git mode: use `wiki-tools sync` after modifications — never run raw `git push` directly
+- Local mode: skip all Git operations; files are the sole source of truth
 
 ## Environment Variables
 

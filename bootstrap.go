@@ -20,6 +20,7 @@ type bootstrapConfig struct {
 	committerName, committerEmail string
 	noServe, noClone, force       bool
 	token, projectName            string
+	local                         bool
 }
 
 func parseBootstrapArgs(args []string) bootstrapConfig {
@@ -52,6 +53,8 @@ func parseBootstrapArgs(args []string) bootstrapConfig {
 			cfg.noClone = true
 		case "--force":
 			cfg.force = true
+		case "--local":
+			cfg.local = true
 		case "--dry-run", "-h", "--help", "--version":
 			// handled before this function
 		default:
@@ -68,6 +71,13 @@ func parseBootstrapArgs(args []string) bootstrapConfig {
 			}
 		}
 		i++
+	}
+
+	// Auto-detect: if remoteURL doesn't look like a Git URL,
+	// treat it as a local path (local mode).
+	if cfg.remoteURL != "" && !isGitURL(cfg.remoteURL) && cfg.localPath == "" {
+		cfg.localPath = cfg.remoteURL
+		cfg.remoteURL = ""
 	}
 
 	if cfg.localPath == "" && cfg.remoteURL != "" {
@@ -93,7 +103,7 @@ func parseBootstrapArgs(args []string) bootstrapConfig {
 }
 
 func printBootstrapHelp() {
-	fmt.Println("用法: wiki-tools bootstrap <REMOTE_URL> [LOCAL_PATH] [OPTIONS]")
+	fmt.Println("用法: wiki-tools bootstrap [REMOTE_URL] [LOCAL_PATH] [OPTIONS]")
 	fmt.Println()
 	fmt.Println("选项:")
 	fmt.Println("  --name NAME           项目名（默认取路径 basename）")
@@ -105,6 +115,7 @@ func printBootstrapHelp() {
 	fmt.Println("  --no-clone            跳过 clone")
 	fmt.Println("  --force               覆盖已存在的 SCHEMA.md")
 	fmt.Println("  --token TOKEN         Git 访问令牌")
+	fmt.Println("  --local               纯本地模式（无 URL 时自动启用）")
 	fmt.Println("  --dry-run             预览模式")
 	fmt.Println("  -h, --help            显示帮助")
 	fmt.Println()
@@ -112,13 +123,28 @@ func printBootstrapHelp() {
 	fmt.Println("  wiki-tools bootstrap git@gitlab.com:group/wiki.git ~/team-wiki")
 	fmt.Println("  wiki-tools bootstrap https://github.com/user/wiki.git --name my-wiki")
 	fmt.Println("  wiki-tools bootstrap <url> ~/existing-dir --no-clone --force")
+	fmt.Println("  wiki-tools bootstrap ~/my-wiki --domain \"我的知识库\"")
+	fmt.Println("  wiki-tools bootstrap --local ~/my-wiki --domain \"我的知识库\"")
 }
 
 func dryRunBootstrap(args []string) {
 	cfg := parseBootstrapArgs(args)
+	if cfg.remoteURL == "" {
+		cfg.local = true
+	}
 	fmt.Println()
 	fmt.Println("🔍 DRY RUN — 预览模式，不会执行任何实际操作")
 	fmt.Println()
+
+	if cfg.local {
+		fmt.Println("  将执行的操作（纯本地模式）：")
+		fmt.Printf("    📂 创建目录结构: %s\n", cfg.localPath)
+		fmt.Printf("    📂 wiki-tools init %s \"%s\"\n", cfg.localPath, cfg.domain)
+		fmt.Println("    ⏭️  跳过所有 Git 操作（clone / sync / serve）")
+		fmt.Println()
+		return
+	}
+
 	fmt.Println("  将执行的操作：")
 	if !cfg.noClone {
 		if git.IsRepo(cfg.localPath) {
@@ -158,9 +184,50 @@ func bootstrapCmd(args []string) {
 	cfg := parseBootstrapArgs(args)
 
 	if cfg.remoteURL == "" {
-		fmt.Fprintln(os.Stderr, "❌ 缺少远程仓库 URL")
-		printBootstrapHelp()
-		os.Exit(1)
+		cfg.local = true
+	}
+
+	if cfg.local {
+		if cfg.localPath == "" {
+			fmt.Fprintln(os.Stderr, "❌ 缺少本地路径")
+			printBootstrapHelp()
+			os.Exit(1)
+		}
+
+		fmt.Println()
+		fmt.Println("╔════════════════════════════════════════════════════════╗")
+		fmt.Println("║     wiki-tools bootstrap · 纯本地模式部署知识库       ║")
+		fmt.Println("╚════════════════════════════════════════════════════════╝")
+		fmt.Println()
+		fmt.Printf("  项目名:     %s\n", cfg.projectName)
+		fmt.Printf("  领域:       %s\n", cfg.domain)
+		fmt.Printf("  本地路径:   %s\n", cfg.localPath)
+		fmt.Println("  模式:       🌐 纯本地（无 Git 依赖）")
+		fmt.Println()
+
+		if err := os.MkdirAll(cfg.localPath, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ 无法创建目录: %s\n", cfg.localPath)
+			os.Exit(3)
+		}
+		if err := wiki.WriteFiles(cfg.localPath, cfg.projectName, cfg.domain, cfg.force, !cfg.local); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ wiki-init 失败: %v\n", err)
+			os.Exit(3)
+		}
+
+		fmt.Printf("✅ wiki-tools init 完成: %s\n", cfg.localPath)
+		fmt.Printf("   领域: %s\n", cfg.domain)
+		fmt.Printf("   目录: %d 个子目录\n", len(wiki.Dirs))
+		fmt.Println()
+		fmt.Println("╔════════════════════════════════════════════════════════╗")
+		fmt.Println("║                 ✅ 本地部署完成！                       ║")
+		fmt.Println("╚════════════════════════════════════════════════════════╝")
+		fmt.Println()
+		fmt.Printf("  📂 知识库路径:   %s\n", cfg.localPath)
+		fmt.Printf("  📋 SCHEMA:       %s/SCHEMA.md\n", cfg.localPath)
+		fmt.Println()
+		fmt.Println("  无需 Git，所有页面直接读写本地文件即可。")
+		fmt.Println()
+		return
 	}
 
 	fmt.Println()
@@ -216,7 +283,7 @@ func bootstrapCmd(args []string) {
 		fmt.Fprintf(os.Stderr, "❌ 无法创建目录: %s\n", cfg.localPath)
 		os.Exit(3)
 	}
-	if err := wiki.WriteFiles(cfg.localPath, cfg.projectName, cfg.domain, cfg.force); err != nil {
+	if err := wiki.WriteFiles(cfg.localPath, cfg.projectName, cfg.domain, cfg.force, !cfg.local); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ wiki-init 失败: %v\n", err)
 		os.Exit(3)
 	}
@@ -316,6 +383,14 @@ func bootstrapCmd(args []string) {
 	fmt.Printf("    wiki-tools init %s \"描述\"       # 重新初始化结构\n", cfg.localPath)
 	fmt.Printf("    wiki-tools serve %s              # 启动定时同步\n", cfg.localPath)
 	fmt.Println()
+}
+
+func isGitURL(s string) bool {
+	return strings.HasPrefix(s, "git@") ||
+		strings.HasPrefix(s, "https://") ||
+		strings.HasPrefix(s, "http://") ||
+		strings.HasPrefix(s, "ssh://") ||
+		strings.HasSuffix(s, ".git")
 }
 
 var hostRegex = regexp.MustCompile(`(?:https?://|@)([^:/@]+)`)

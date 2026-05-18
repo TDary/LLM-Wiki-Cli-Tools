@@ -19,10 +19,19 @@ wiki-tools init <path> "<domain>"
 wiki-tools serve ~/team-wiki --interval 10
 ```
 
+## Mode Detection
+
+Check `SCHEMA.md` first. The **Git 同步** field in the info table tells you the wiki mode:
+
+| Git 同步 | Mode | Behavior |
+|-----------|------|----------|
+| `启用` | Git mode | Run `wiki-tools sync` after changes |
+| `禁用（纯本地模式）` | Local mode | Skip all Git operations; just read/write files directly |
+
 ## Key Rules
 
 1. **Read before writing** — always check `SCHEMA.md`, `README.md`, and recent `log.md` first
-2. **Auto-sync after changes** — run `wiki-tools sync ~/team-wiki` after any modification
+2. **Auto-sync after changes** — if Git mode, run `wiki-tools sync <path>` after any modification. If local mode, skip.
 3. **Cross-reference** — every new page must link to >=2 existing pages with `[[wikilinks]]`
 4. **Log everything** — append to `log.md` after every action (ingest, update, query)
 5. **Raw is immutable** — never modify files in `raw/`. Corrections go in wiki pages.

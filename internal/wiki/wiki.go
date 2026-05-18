@@ -43,7 +43,11 @@ const gitattributesContent = `# LLM Wiki — Gitattributes
 *.yaml text eol=lf
 `
 
-func generateSCHEMA(name, domain string) string {
+func generateSCHEMA(name, domain string, git bool) string {
+	mode := "启用"
+	if !git {
+		mode = "禁用（纯本地模式）"
+	}
 	return fmt.Sprintf(`# SCHEMA — %s
 
 > 知识库领域配置 · 自动生成的索引和关系
@@ -54,6 +58,7 @@ func generateSCHEMA(name, domain string) string {
 |------|-----|
 | **名称** | %s |
 | **领域** | %s |
+| **Git 同步** | %s |
 | **创建时间** | %s |
 | **初始化工具** | wiki-tools |
 
@@ -89,7 +94,7 @@ func generateSCHEMA(name, domain string) string {
   - implements: 实现
   - owned_by: 归属
 `+"```"+`
-`, name, name, domain, time.Now().Format("2006-01-02 15:04:05"))
+`, name, name, domain, mode, time.Now().Format("2006-01-02 15:04:05"))
 }
 
 func generateREADME(name, domain string) string {
@@ -126,7 +131,7 @@ func generateLog() string {
 var Dirs = []string{"raw", "entities", "concepts", "relations", "queries", "drafts"}
 
 // WriteFiles creates the wiki directory structure and skeleton files.
-func WriteFiles(path, name, domain string, force bool) error {
+func WriteFiles(path, name, domain string, force, git bool) error {
 	for _, dir := range Dirs {
 		dirPath := filepath.Join(path, dir)
 		if err := os.MkdirAll(dirPath, 0755); err != nil {
@@ -168,7 +173,7 @@ func WriteFiles(path, name, domain string, force bool) error {
 	// SCHEMA.md
 	schemaPath := filepath.Join(path, "SCHEMA.md")
 	if force || !FileExists(schemaPath) {
-		if err := os.WriteFile(schemaPath, []byte(generateSCHEMA(name, domain)), 0644); err != nil {
+		if err := os.WriteFile(schemaPath, []byte(generateSCHEMA(name, domain, git)), 0644); err != nil {
 			return fmt.Errorf("写入 SCHEMA.md: %w", err)
 		}
 		fmt.Printf("📄 %s/SCHEMA.md\n", name)

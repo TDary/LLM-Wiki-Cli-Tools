@@ -16,7 +16,10 @@
       "Bash(rm -rf /tmp/test-wiki2)",
       "Read(//tmp/**)",
       "Bash(rm -rf bin/ examples/)",
-      "Bash(echo \"\")"
+      "Bash(echo \"\")",
+      "Bash(rm -rf /tmp/test-auto-local /tmp/test-dry)",
+      "Read(//c/Users/Administrator/test-auto-local/**)",
+      "Bash(rm -rf /c/Users/Administrator/test-auto-local)"
     ]
   }
 }
