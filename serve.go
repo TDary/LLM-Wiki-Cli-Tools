@@ -54,13 +54,13 @@ func serveCmd(args []string) {
 		os.Exit(3)
 	}
 
-	if !git.IsRepo(wikiPath) {
-		fmt.Fprintf(os.Stderr, "❌ 不是 Git 仓库: %s\n", wikiPath)
+	if *interval <= 0 {
+		fmt.Fprintln(os.Stderr, "❌ --interval 必须大于 0")
 		os.Exit(1)
 	}
 
-	if *interval <= 0 {
-		fmt.Fprintln(os.Stderr, "❌ --interval 必须大于 0")
+	if !git.IsRepo(wikiPath) {
+		fmt.Fprintf(os.Stderr, "❌ 不是 Git 仓库: %s\n", wikiPath)
 		os.Exit(1)
 	}
 
@@ -111,15 +111,16 @@ func serveCmd(args []string) {
 func printServeHelp() {
 	fmt.Println("用法: wiki-tools serve <WIKI_PATH> [OPTIONS]")
 	fmt.Println()
-	fmt.Println("  启动定时同步守护进程。")
+	fmt.Println("  启动定时同步守护进程。选项可放在路径前后。")
 	fmt.Println()
 	fmt.Println("选项:")
 	fmt.Println("  --interval N  同步间隔（分钟，默认 10）")
 	fmt.Println("  --name NAME   提交者名字（默认 \"AI Assistant\"）")
 	fmt.Println("  --email E     提交者邮箱（默认 \"ai@local\"）")
+	fmt.Println("  -h, --help    显示帮助")
 	fmt.Println("  --version     显示版本")
 	fmt.Println()
 	fmt.Println("示例:")
 	fmt.Println("  wiki-tools serve ~/team-wiki")
-	fmt.Println("  wiki-tools serve ~/team-wiki --interval 30")
+	fmt.Println("  wiki-tools serve --interval 30 ~/team-wiki")
 }
