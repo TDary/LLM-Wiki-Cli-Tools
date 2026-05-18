@@ -1,0 +1,129 @@
+#!/bin/bash
+# git-auto-sync — 通用 Git 自动提交+推送脚本
+# 适用平台：Hermes Agent / Claude Code / OpenClaw / 任何能调 shell 的 agent
+# 
+# 用法：
+#   git-auto-sync [REPO_PATH]          # 默认当前目录
+#   git-auto-sync ~/team-wiki
+#   git-auto-sync ~/my-project
+#
+# 环境变量（全部可选，有合理默认值）：
+#   GIT_SYNC_NAME      提交者名字（默认 "AI Assistant"）
+#   GIT_SYNC_EMAIL     提交者邮箱（默认 "ai@local"）
+#   GIT_SYNC_BRANCH    推送分支（默认当前分支）
+#   GIT_SYNC_MESSAGE   commit message 模板，支持 {timestamp} 占位符
+#                      默认："auto sync: {timestamp}"
+#   GIT_SYNC_DRY_RUN   设为 1 则只检查不执行
+#   GIT_SYNC_FORCE_PUSH 设为 1 则推送失败时尝试 --force-with-lease
+#
+# 退出码：
+#   0 — 成功同步 或 无修改无需同步
+#   1 — 不是 Git 仓库
+#   2 — 推送失败
+#   3 — 其他错误
+
+set -euo pipefail
+
+# ============================================================
+# 配置
+# ============================================================
+REPO_PATH="${1:-.}"
+GIT_SYNC_NAME="${GIT_SYNC_NAME:-AI Assistant}"
+GIT_SYNC_EMAIL="${GIT_SYNC_EMAIL:-ai@local}"
+GIT_SYNC_DRY_RUN="${GIT_SYNC_DRY_RUN:-0}"
+
+# 将路径转为绝对路径
+REPO_PATH="$(cd "$REPO_PATH" 2>/dev/null && pwd)" || {
+    echo "❌ git-auto-sync: 路径不存在或无权限 → $1"
+    exit 3
+}
+
+cd "$REPO_PATH"
+
+# ============================================================
+# 前置检查
+# ============================================================
+if [ ! -d .git ]; then
+    echo "❌ git-auto-sync: 不是 Git 仓库 → $REPO_PATH"
+    exit 1
+fi
+
+# ============================================================
+# 检查是否有修改
+# ============================================================
+if ! git status --porcelain | grep -q .; then
+    echo "ℹ️  git-auto-sync: 无修改 [$REPO_PATH] — 跳过"
+    exit 0
+fi
+
+# ============================================================
+# 配置提交身份
+# ============================================================
+git config user.name "$GIT_SYNC_NAME"
+git config user.email "$GIT_SYNC_EMAIL"
+
+# ============================================================
+# 生成 commit message
+# ============================================================
+TIMESTAMP="$(date '+%Y-%m-%d %H:%M:%S')"
+DEFAULT_MSG="auto sync: ${TIMESTAMP}"
+COMMIT_MSG="${GIT_SYNC_MESSAGE:-${DEFAULT_MSG}}"
+COMMIT_MSG="${COMMIT_MSG//\{timestamp\}/${TIMESTAMP}}"
+
+# ============================================================
+# Dry run 模式
+# ============================================================
+if [ "$GIT_SYNC_DRY_RUN" = "1" ]; then
+    echo "🔍 git-auto-sync: DRY RUN [$REPO_PATH]"
+    echo "   待提交文件："
+    git status --porcelain
+    echo "   commit message: $COMMIT_MSG"
+    echo "   branch: ${GIT_SYNC_BRANCH:-(commit 后确定)}"
+    echo "   author: $GIT_SYNC_NAME <$GIT_SYNC_EMAIL>"
+    exit 0
+fi
+
+# ============================================================
+# 提交
+# ============================================================
+git add .
+if git commit -m "$COMMIT_MSG" > /dev/null 2>&1; then
+    SHORT_HASH="$(git rev-parse --short HEAD)"
+else
+    echo "⚠️  git-auto-sync: 提交无变化（可能已被其他进程提交）[$REPO_PATH]"
+    exit 0
+fi
+
+# ============================================================
+# 推送
+# ============================================================
+
+# 在 commit 之后解析分支（commit 前空仓库没有有效 HEAD）
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
+if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" = "HEAD" ]; then
+    # 空仓库的初始 commit 后分支可能仍为 HEAD，用 init.defaultBranch 兜底
+    CURRENT_BRANCH="$(git config --default main --get init.defaultBranch)"
+fi
+GIT_SYNC_BRANCH="${GIT_SYNC_BRANCH:-$CURRENT_BRANCH}"
+
+if [ "$GIT_SYNC_BRANCH" != "$CURRENT_BRANCH" ]; then
+    echo "❌ git-auto-sync: 当前分支 ($CURRENT_BRANCH) ≠ 目标分支 ($GIT_SYNC_BRANCH)，请先切换分支"
+    exit 2
+fi
+
+if git push origin "$GIT_SYNC_BRANCH" 2>&1; then
+    echo "✅ git-auto-sync: $SHORT_HASH → origin/$GIT_SYNC_BRANCH [$REPO_PATH]"
+    exit 0
+fi
+
+# 推送失败，尝试 force-with-lease（需显式启用）
+if [ "${GIT_SYNC_FORCE_PUSH:-0}" = "1" ]; then
+    echo "⚠️  git-auto-sync: 普通推送失败，尝试 --force-with-lease..."
+    if git push --force-with-lease origin "$GIT_SYNC_BRANCH" 2>&1; then
+        echo "✅ git-auto-sync: $SHORT_HASH → origin/$GIT_SYNC_BRANCH (force-with-lease) [$REPO_PATH]"
+        exit 0
+    fi
+fi
+
+echo "❌ git-auto-sync: 推送失败 [$REPO_PATH]"
+exit 2

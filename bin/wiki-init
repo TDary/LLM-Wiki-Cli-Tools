@@ -1,0 +1,251 @@
+#!/bin/bash
+# wiki-init — 初始化 LLM Wiki 知识库目录结构
+# 适用平台：Hermes Agent / Claude Code / OpenClaw / 任何能调 shell 的 agent
+#
+# 用法：
+#   wiki-init <WIKI_PATH> <DOMAIN> [OPTIONS]
+#   wiki-init ~/team-wiki "团队共享知识库"
+#   wiki-init ~/my-wiki "个人知识库" --no-git
+#
+# 选项：
+#   --no-git     不初始化 Git 仓库（目录已存在时不重新 git init）
+#   --force      覆盖已存在的文件（默认跳过已存在的 SCHEMA.md）
+#   --name       项目名（会写入 SCHEMA.md，默认取 WIKI_PATH 的 basename）
+#
+# 退出码：
+#   0 — 成功
+#   1 — 参数错误
+#   2 — 目录创建失败
+
+set -euo pipefail
+
+# ============================================================
+# 参数解析
+# ============================================================
+NO_GIT=false
+FORCE=false
+
+usage() {
+    cat <<EOF
+用法: wiki-init <WIKI_PATH> <DOMAIN> [OPTIONS]
+
+参数:
+  WIKI_PATH    知识库本地路径（必须）
+  DOMAIN       领域名称，写入 SCHEMA.md（必须）
+
+选项:
+  --no-git     不初始化 Git 仓库
+  --force      覆盖已存在的文件
+  --name NAME  项目名（默认取目录名）
+
+示例:
+  wiki-init ~/team-wiki "团队共享知识库"
+  wiki-init ~/my-wiki "个人知识库" --name my-wiki
+  wiki-init ~/wiki "实验项目" --force --no-git
+EOF
+    exit 1
+}
+
+[ $# -ge 2 ] || usage
+
+WIKI_PATH="$1"
+DOMAIN="$2"
+shift 2
+
+WIKI_NAME="$(basename "$WIKI_PATH")"
+
+# 解析可选参数
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --no-git)   NO_GIT=true ;;
+        --force)    FORCE=true ;;
+        --name)     WIKI_NAME="$2"; shift ;;
+        -h|--help)  usage ;;
+        *)          echo "❌ 未知选项: $1"; usage ;;
+    esac
+    shift
+done
+
+# ============================================================
+# 创建目录结构
+# ============================================================
+mkdir -p "$WIKI_PATH" || { echo "❌ 无法创建目录: $WIKI_PATH"; exit 2; }
+WIKI_PATH="$(cd "$WIKI_PATH" && pwd)"
+
+DIRS=(
+    "raw"           # 原始资料/外部引用
+    "entities"      # 实体页面
+    "concepts"      # 概念/术语
+    "relations"     # 关系/链接
+    "queries"       # 查询/模板
+    "drafts"        # 草稿/临时
+)
+
+for dir in "${DIRS[@]}"; do
+    mkdir -p "$WIKI_PATH/$dir"
+    # 每个目录放一个 .gitkeep（除非已有文件）
+    if [ ! "$(ls -A "$WIKI_PATH/$dir" 2>/dev/null)" ]; then
+        touch "$WIKI_PATH/$dir/.gitkeep"
+    fi
+done
+
+echo "📁 目录结构已创建:"
+for dir in "${DIRS[@]}"; do
+    echo "   $dir/"
+done
+
+# ============================================================
+# 生成 .gitignore
+# ============================================================
+GITIGNORE="$WIKI_PATH/.gitignore"
+if [ "$FORCE" = true ] || [ ! -f "$GITIGNORE" ]; then
+    cat > "$GITIGNORE" <<'GITIGNORE_EOF'
+# LLM Wiki — Gitignore
+# =====================
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 编辑器
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# 临时文件
+*.tmp
+*.bak
+*.log
+
+# Python（如果 wiki 中包含脚本）
+__pycache__/
+*.pyc
+.venv/
+
+# Node（如果 wiki 中包含编译工具）
+node_modules/
+GITIGNORE_EOF
+    echo "📄 $WIKI_NAME/.gitignore"
+fi
+
+# ============================================================
+# 生成 SCHEMA.md
+# ============================================================
+SCHEMA="$WIKI_PATH/SCHEMA.md"
+if [ "$FORCE" = true ] || [ ! -f "$SCHEMA" ]; then
+    cat > "$SCHEMA" <<SCHEMA_EOF
+# SCHEMA — ${WIKI_NAME}
+
+> 知识库领域配置 · 自动生成的索引和关系  
+
+## 基本信息
+
+| 属性 | 值 |
+|------|-----|
+| **名称** | ${WIKI_NAME} |
+| **领域** | ${DOMAIN} |
+| **创建时间** | $(date '+%Y-%m-%d %H:%M:%S') |
+| **初始化工具** | wiki-init |
+
+## 目录说明
+
+| 目录 | 用途 |
+|------|------|
+| \`raw/\` | 原始资料、外部引用、数据文件 |
+| \`entities/\` | 实体页面（人、项目、工具等） |
+| \`concepts/\` | 概念、术语、方法论 |
+| \`relations/\` | 关系描述、交叉引用 |
+| \`queries/\` | 查询模板、搜索索引 |
+| \`drafts/\` | 草稿、临时笔记 |
+
+## 标签体系
+
+<!-- 可自定义标签，用于分类和检索 -->
+\`\`\`yaml
+tags:
+  - type: tech
+    label: 技术
+  - type: process  
+    label: 流程
+  - type: reference
+    label: 参考
+\`\`\`
+
+## 关系类型
+
+<!-- 可自定义实体间关系 -->
+\`\`\`yaml
+relations:
+  - depends_on: 依赖
+  - references: 引用
+  - implements: 实现
+  - owned_by: 归属
+\`\`\`
+SCHEMA_EOF
+    echo "📄 $WIKI_NAME/SCHEMA.md"
+fi
+
+# ============================================================
+# 生成 README.md / index.md
+# ============================================================
+INDEX="$WIKI_PATH/README.md"
+if [ "$FORCE" = true ] || [ ! -f "$INDEX" ]; then
+    cat > "$INDEX" <<INDEX_EOF
+# ${WIKI_NAME}
+
+> ${DOMAIN}
+
+## 快速导航
+
+- 📋 [SCHEMA](./SCHEMA.md) — 知识库配置与目录说明
+- 📝 [原始资料](./raw/) — 外部引用与数据文件
+- 🧩 [实体](./entities/) — 人、项目、工具等
+- 💡 [概念](./concepts/) — 术语与方法论
+- 🔗 [关系](./relations/) — 交叉引用
+- 🔍 [查询](./queries/) — 搜索索引
+- ✏️ [草稿](./drafts/) — 临时笔记
+
+## 更新日志
+
+参见 [log.md](./log.md)
+INDEX_EOF
+    echo "📄 $WIKI_NAME/README.md"
+fi
+
+# ============================================================
+# 生成 log.md
+# ============================================================
+LOG="$WIKI_PATH/log.md"
+if [ "$FORCE" = true ] || [ ! -f "$LOG" ]; then
+    cat > "$LOG" <<LOG_EOF
+# 更新日志
+
+## $(date '+%Y-%m-%d')
+
+- 🎉 知识库初始化完成
+LOG_EOF
+    echo "📄 $WIKI_NAME/log.md"
+fi
+
+# ============================================================
+# Git 初始化
+# ============================================================
+if [ "$NO_GIT" = false ] && [ ! -d "$WIKI_PATH/.git" ]; then
+    cd "$WIKI_PATH"
+    git init
+    git add .
+    git commit -m "Initial commit: wiki-init bootstrap"
+    echo ""
+    echo "🔧 Git 仓库已初始化"
+fi
+
+echo ""
+echo "✅ wiki-init 完成: $WIKI_PATH"
+echo "   领域: $DOMAIN"
+echo "   目录: ${#DIRS[@]} 个子目录"
+echo ""
+echo "下一步："
+echo "   wiki-bootstrap <remote-url> $WIKI_PATH    # 绑定远程仓库并配置自动同步"
+echo "   或手动: git remote add origin <url> && git push -u origin main"
