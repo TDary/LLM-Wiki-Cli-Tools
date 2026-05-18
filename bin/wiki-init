@@ -19,6 +19,8 @@
 
 set -euo pipefail
 
+VERSION="0.1.0"
+
 # ============================================================
 # 参数解析
 # ============================================================
@@ -37,14 +39,28 @@ usage() {
   --no-git     不初始化 Git 仓库
   --force      覆盖已存在的文件
   --name NAME  项目名（默认取目录名）
+  -h, --help   显示帮助
+  --version    显示版本
 
 示例:
   wiki-init ~/team-wiki "团队共享知识库"
   wiki-init ~/my-wiki "个人知识库" --name my-wiki
   wiki-init ~/wiki "实验项目" --force --no-git
 EOF
-    exit 1
+    exit "${1:-1}"
 }
+
+help() {
+    usage 0
+}
+
+[ $# -ge 1 ] || usage
+
+# 处理 --help / --version（必须在位置参数之前）
+case "$1" in
+    -h|--help) help ;;
+    --version) echo "wiki-init v${VERSION}"; exit 0 ;;
+esac
 
 [ $# -ge 2 ] || usage
 
@@ -60,7 +76,8 @@ while [ $# -gt 0 ]; do
         --no-git)   NO_GIT=true ;;
         --force)    FORCE=true ;;
         --name)     WIKI_NAME="$2"; shift ;;
-        -h|--help)  usage ;;
+        -h|--help)  help ;;
+        --version)  echo "wiki-init v${VERSION}"; exit 0 ;;
         *)          echo "❌ 未知选项: $1"; usage ;;
     esac
     shift
@@ -128,6 +145,22 @@ __pycache__/
 node_modules/
 GITIGNORE_EOF
     echo "📄 $WIKI_NAME/.gitignore"
+fi
+
+# ============================================================
+# 生成 .gitattributes
+# ============================================================
+GITATTRS="$WIKI_PATH/.gitattributes"
+if [ "$FORCE" = true ] || [ ! -f "$GITATTRS" ]; then
+    cat > "$GITATTRS" <<'GITATTRS_EOF'
+# LLM Wiki — Gitattributes
+# Normalize line endings to LF for cross-platform compatibility
+*.md text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+GITATTRS_EOF
+    echo "📄 $WIKI_NAME/.gitattributes"
 fi
 
 # ============================================================

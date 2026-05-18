@@ -24,10 +24,77 @@
 
 set -euo pipefail
 
+VERSION="0.1.0"
+
+# ============================================================
+# 帮助
+# ============================================================
+help() {
+    cat <<'EOF'
+git-auto-sync — 通用 Git 自动提交+推送脚本
+
+用法:
+  git-auto-sync [REPO_PATH] [OPTIONS]
+
+  无参数时同步当前目录。
+
+选项:
+  --rebase          推送前先 git pull --rebase（避免远程有新提交时失败）
+  -h, --help        显示帮助
+  --version         显示版本
+
+环境变量:
+  GIT_SYNC_NAME         提交者名字（默认 "AI Assistant"）
+  GIT_SYNC_EMAIL        提交者邮箱（默认 "ai@local"）
+  GIT_SYNC_BRANCH       推送目标分支（默认当前分支）
+  GIT_SYNC_MESSAGE      commit message 模板，支持 {timestamp} 占位符
+                        默认："auto sync: {timestamp}"
+  GIT_SYNC_DRY_RUN      设为 1 只检查不执行
+  GIT_SYNC_FORCE_PUSH   设为 1 推送失败时尝试 --force-with-lease
+
+退出码:
+  0 — 成功同步 或 无修改无需同步
+  1 — 不是 Git 仓库
+  2 — 推送失败
+  3 — 路径不存在
+EOF
+    exit 0
+}
+
+# ============================================================
+# 参数解析
+# ============================================================
+PULL_BEFORE_PUSH=false
+REPO_PATH=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help)      help ;;
+        --version)      echo "git-auto-sync v${VERSION}"; exit 0 ;;
+        --rebase)       PULL_BEFORE_PUSH=true ;;
+        -*)
+            echo "❌ 未知选项: $1"
+            echo "   使用 --help 查看用法"
+            exit 3
+            ;;
+        *)
+            if [ -z "$REPO_PATH" ]; then
+                REPO_PATH="$1"
+            else
+                echo "❌ 多余的参数: $1"
+                echo "   使用 --help 查看用法"
+                exit 3
+            fi
+            ;;
+    esac
+    shift
+done
+
+REPO_PATH="${REPO_PATH:-.}"
+
 # ============================================================
 # 配置
 # ============================================================
-REPO_PATH="${1:-.}"
 GIT_SYNC_NAME="${GIT_SYNC_NAME:-AI Assistant}"
 GIT_SYNC_EMAIL="${GIT_SYNC_EMAIL:-ai@local}"
 GIT_SYNC_DRY_RUN="${GIT_SYNC_DRY_RUN:-0}"
@@ -109,6 +176,11 @@ GIT_SYNC_BRANCH="${GIT_SYNC_BRANCH:-$CURRENT_BRANCH}"
 if [ "$GIT_SYNC_BRANCH" != "$CURRENT_BRANCH" ]; then
     echo "❌ git-auto-sync: 当前分支 ($CURRENT_BRANCH) ≠ 目标分支 ($GIT_SYNC_BRANCH)，请先切换分支"
     exit 2
+fi
+
+# 可选：推送前先拉取
+if [ "$PULL_BEFORE_PUSH" = true ]; then
+    git pull --rebase origin "$GIT_SYNC_BRANCH" 2>/dev/null || echo "   ℹ️  pull --rebase 失败，继续尝试推送..."
 fi
 
 if git push origin "$GIT_SYNC_BRANCH" 2>&1; then
