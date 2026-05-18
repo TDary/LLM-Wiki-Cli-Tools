@@ -7,20 +7,23 @@
 
 ```bash
 # One-command team wiki setup
-wiki-bootstrap <REMOTE_URL> ~/team-wiki --domain "Team Knowledge Base"
+wiki-tools bootstrap <REMOTE_URL> ~/team-wiki --domain "Team Knowledge Base"
 
 # Manual sync
-git-auto-sync ~/team-wiki
+wiki-tools sync ~/team-wiki
 
 # Init new wiki
-wiki-init <path> "<domain>"
+wiki-tools init <path> "<domain>"
+
+# Start periodic sync daemon
+wiki-tools serve ~/team-wiki --interval 10
 ```
 
 ## Key Rules
 
 1. **Read before writing** — always check `SCHEMA.md`, `README.md`, and recent `log.md` first
-2. **Auto-sync after changes** — run `git-auto-sync ~/team-wiki` after any modification
-3. **Cross-reference** — every new page must link to ≥2 existing pages with `[[wikilinks]]`
+2. **Auto-sync after changes** — run `wiki-tools sync ~/team-wiki` after any modification
+3. **Cross-reference** — every new page must link to >=2 existing pages with `[[wikilinks]]`
 4. **Log everything** — append to `log.md` after every action (ingest, update, query)
 5. **Raw is immutable** — never modify files in `raw/`. Corrections go in wiki pages.
 
@@ -35,17 +38,18 @@ wiki-init <path> "<domain>"
 | `queries/` | Saved search results |
 | `drafts/` | Work in progress |
 
-## CLI Tools (platform-agnostic)
+## CLI Tool (platform-agnostic)
 
-All tools are pure bash, no dependencies beyond git:
+`wiki-tools` is a single static Go binary — no dependencies beyond git:
 
-| Tool | Purpose |
-|------|---------|
-| `git-auto-sync <path>` | Auto-commit + push any Git repo |
-| `wiki-init <path> <domain>` | Initialize wiki directory structure |
-| `wiki-bootstrap <url> [path]` | One-command clone + init + cron sync |
+| Command | Purpose |
+|---------|---------|
+| `wiki-tools sync <path>` | Auto-commit + push any Git repo |
+| `wiki-tools init <path> <domain>` | Initialize wiki directory structure |
+| `wiki-tools bootstrap <url> [path]` | One-command clone + init + config + sync |
+| `wiki-tools serve <path>` | Start periodic sync daemon (replaces cron) |
 
-Environment variables for `git-auto-sync`:
+Environment variables for `wiki-tools sync` (CLI flags take priority):
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -53,3 +57,14 @@ Environment variables for `git-auto-sync`:
 | `GIT_SYNC_EMAIL` | `ai@local` | Committer email |
 | `GIT_SYNC_MESSAGE` | `auto sync: {timestamp}` | Commit message template |
 | `GIT_SYNC_DRY_RUN` | `0` | Set to `1` for preview mode |
+
+## Download
+
+Prebuilt binaries available in the `dist/` directory:
+
+| Platform | Binary |
+|----------|--------|
+| Windows (x64) | `wiki-tools.exe` |
+| Linux (x64) | `dist/wiki-tools-linux` |
+| macOS Intel | `dist/wiki-tools-darwin-amd64` |
+| macOS Apple Silicon | `dist/wiki-tools-darwin-arm64` |

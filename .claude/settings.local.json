@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go version *)",
+      "Bash(go build *)",
+      "Bash(./wiki-tools --help)",
+      "Bash(./wiki-tools --version)",
+      "Bash(rm -rf /tmp/test-wiki)",
+      "Bash(./wiki-tools init *)",
+      "Bash(./wiki-tools sync *)",
+      "Bash(rm -rf /tmp/test-bootstrap)",
+      "Bash(./wiki-tools bootstrap *)",
+      "Bash(timeout 5 ./wiki-tools serve /f/team-wiki --interval 60)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(./wiki-tools serve *)",
+      "Bash(rm -rf /tmp/test-wiki2)",
+      "Read(//tmp/**)",
+      "Bash(rm -rf bin/ examples/)",
+      "Bash(echo \"\")"
+    ]
+  }
+}

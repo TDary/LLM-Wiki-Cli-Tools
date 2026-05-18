@@ -1,23 +1,38 @@
 # Claude Code Wiki Integration
 
-When working with this wiki, use the following CLI tools (installed at `~/.local/bin/`).
+When working with this wiki, use `wiki-tools` (Go binary, installed at `~/.local/bin/` or anywhere in PATH).
 
 ## One-Command Setup
 
 ```bash
-wiki-bootstrap <REMOTE_URL> ~/team-wiki --domain "团队知识库"
+wiki-tools bootstrap <REMOTE_URL> ~/team-wiki --domain "团队知识库"
 ```
 
 ## Daily Operations
 
 **Auto-sync to Git:**
 ```bash
-git-auto-sync ~/team-wiki
+wiki-tools sync ~/team-wiki
+```
+
+**Preview before sync:**
+```bash
+wiki-tools sync ~/team-wiki --dry-run
+```
+
+**With rebase:**
+```bash
+wiki-tools sync ~/team-wiki --rebase
 ```
 
 **Initialize a new wiki:**
 ```bash
-wiki-init <path> "<domain description>"
+wiki-tools init <path> "<domain description>"
+```
+
+**Start periodic sync daemon (replaces cron):**
+```bash
+wiki-tools serve ~/team-wiki --interval 10
 ```
 
 **Search the wiki:**
@@ -46,13 +61,17 @@ team-wiki/
 - Cross-reference with `[[wikilinks]]`
 - Every page must link to at least 2 other pages
 - Update `log.md` after every action
-- Use `git-auto-sync` after modifications — never run raw `git push` directly
+- Use `wiki-tools sync` after modifications — never run raw `git push` directly
 
-## Git Auto-Sync
+## Environment Variables
 
-The `git-auto-sync` script handles all edge cases (no changes, push conflicts, empty repos).
-Customize via environment variables:
+`wiki-tools sync` respects the following env vars (CLI flags take priority):
 
-```bash
-GIT_SYNC_NAME="Claude" GIT_SYNC_EMAIL="claude@local" git-auto-sync ~/team-wiki
-```
+| Variable | Purpose |
+|----------|---------|
+| `GIT_SYNC_NAME` | Committer name |
+| `GIT_SYNC_EMAIL` | Committer email |
+| `GIT_SYNC_BRANCH` | Target branch |
+| `GIT_SYNC_MESSAGE` | Commit message template |
+| `GIT_SYNC_DRY_RUN` | Set to `1` for preview |
+| `GIT_SYNC_FORCE_PUSH` | Set to `1` for force-with-lease |
