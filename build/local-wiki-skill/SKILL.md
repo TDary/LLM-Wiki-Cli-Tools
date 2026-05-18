@@ -20,9 +20,12 @@ Copies this `SKILL.md` and `wiki.py` into your project's `.claude/` directory.
 ```
 local-wiki-skill/
 ├── SKILL.md           # Claude Code skill definition (this file)
+├── AGENTS.md           # Copilot / Cursor / Windsurf / OpenClaw instructions
 └── scripts/
-    └── wiki.py        # Python CLI — all four commands in one file
+    └── wiki.py        # Python CLI — all commands in one file
 ```
+
+`python scripts/wiki.py install <project>` copies all three files to the right places for each tool.
 
 ## CLI Commands
 

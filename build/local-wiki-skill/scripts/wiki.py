@@ -184,7 +184,7 @@ def cmd_bootstrap(args: argparse.Namespace) -> None:
 
 
 def cmd_install(args: argparse.Namespace) -> None:
-    """Install SKILL.md and wiki.py into a project."""
+    """Install skill files into a project (Claude Code, Copilot, Cursor, Windsurf, OpenClaw)."""
     import shutil
 
     project = expand(args.path)
@@ -193,20 +193,27 @@ def cmd_install(args: argparse.Namespace) -> None:
     skill_dir.mkdir(parents=True, exist_ok=True)
     scripts_dir.mkdir(parents=True, exist_ok=True)
 
-    # Find SKILL.md relative to this script
     script_path = Path(__file__).resolve()
     pkg_dir = script_path.parent.parent  # scripts/.. -> package root
-    skill_src = pkg_dir / "SKILL.md"
 
+    # Claude Code skill
+    skill_src = pkg_dir / "SKILL.md"
     if skill_src.exists():
         shutil.copy2(skill_src, skill_dir / "wiki.md")
         print(f"✔  {skill_dir / 'wiki.md'}")
 
+    # Other agents (Copilot, Cursor, Windsurf, OpenClaw)
+    agents_src = pkg_dir / "AGENTS.md"
+    if agents_src.exists():
+        shutil.copy2(agents_src, project / "AGENTS.md")
+        print(f"✔  {project / 'AGENTS.md'}")
+
+    # Python script
     shutil.copy2(script_path, scripts_dir / "wiki.py")
     print(f"✔  {scripts_dir / 'wiki.py'}")
 
     print()
-    print("Done. Open the project in Claude Code and try: /wiki init")
+    print("Done. The skill is now active for Claude Code + all AGENTS.md-compatible tools.")
 
 
 # ── CLI ──
