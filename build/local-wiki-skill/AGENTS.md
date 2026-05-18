@@ -62,6 +62,8 @@ This is **pure local mode**. There is no Git, no network, no sync. Files are the
 | `python scripts/wiki.py sync [path]` | Confirm local-only status |
 | `python scripts/wiki.py bootstrap <path>` | Bootstrap wiki at a given path |
 | `python scripts/wiki.py install <project>` | Install skill into a project |
+| `python scripts/wiki.py list [path] [--format json]` | List all documents with metadata |
+| `python scripts/wiki.py index [path] [--output FILE]` | Generate structured JSON index for frontend |
 
 ## Wiki Structure
 

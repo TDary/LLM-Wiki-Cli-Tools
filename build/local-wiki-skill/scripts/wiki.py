@@ -17,6 +17,15 @@ VERSION = "0.1.0"
 
 DIRS = ["raw", "entities", "concepts", "relations", "queries", "drafts"]
 
+CATEGORY_LABELS = {
+    "raw": "原始资料",
+    "entities": "实体",
+    "concepts": "概念",
+    "relations": "关系",
+    "queries": "查询",
+    "drafts": "草稿",
+}
+
 
 # ── helpers ──
 
@@ -112,6 +121,104 @@ def template_log() -> str:
 
 - 🎉 知识库初始化完成
 """
+
+
+# ── document helpers ──
+
+def extract_title(filepath: Path) -> str:
+    """Extract title from first # heading in a markdown file."""
+    try:
+        for line in filepath.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("# ") and not stripped.startswith("## "):
+                return stripped[2:].strip()
+    except Exception:
+        pass
+    return filepath.stem.replace("-", " ").title()
+
+
+def extract_frontmatter(filepath: Path) -> dict:
+    """Extract YAML-style frontmatter between --- markers."""
+    fm = {}
+    try:
+        content = filepath.read_text(encoding="utf-8")
+        lines = content.splitlines()
+        if lines and lines[0].strip() == "---":
+            for i in range(1, len(lines)):
+                line = lines[i].strip()
+                if line == "---":
+                    break
+                if ":" in line:
+                    key, _, val = line.partition(":")
+                    key = key.strip()
+                    val = val.strip().strip('"').strip("'")
+                    if key == "tags":
+                        fm[key] = [t.strip() for t in val.strip("[]").split(",") if t.strip()]
+                    else:
+                        fm[key] = val
+    except Exception:
+        pass
+    return fm
+
+
+def count_wikilinks(filepath: Path) -> int:
+    """Count [[wikilinks]] in a markdown file."""
+    import re
+    try:
+        text = filepath.read_text(encoding="utf-8")
+        return len(re.findall(r"\[\[.+?\]\]", text))
+    except Exception:
+        return 0
+
+
+def collect_documents(wiki_path: Path) -> list[dict]:
+    """Walk all category dirs and collect markdown file metadata."""
+    docs = []
+    for d in DIRS:
+        category_dir = wiki_path / d
+        if not category_dir.is_dir():
+            continue
+        for md_file in sorted(category_dir.glob("*.md")):
+            stat = md_file.stat()
+            fm = extract_frontmatter(md_file)
+            docs.append({
+                "title": fm.get("title") or extract_title(md_file),
+                "file": str(md_file.relative_to(wiki_path)).replace("\\", "/"),
+                "absolute_path": str(md_file.resolve()).replace("\\", "/"),
+                "category": d,
+                "category_label": CATEGORY_LABELS.get(d, d),
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                "tags": fm.get("tags", []),
+                "links_count": count_wikilinks(md_file),
+            })
+    return docs
+
+
+def read_schema_meta(wiki_path: Path) -> dict:
+    """Read basic metadata from SCHEMA.md."""
+    meta = {"name": wiki_path.name, "domain": "Wiki 知识库"}
+    schema_path = wiki_path / "SCHEMA.md"
+    if not schema_path.exists():
+        return meta
+    try:
+        for line in schema_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("| **名称** |"):
+                parts = [p.strip() for p in stripped.split("|") if p.strip()]
+                if len(parts) >= 2:
+                    meta["name"] = parts[1]
+            elif stripped.startswith("| **领域** |"):
+                parts = [p.strip() for p in stripped.split("|") if p.strip()]
+                if len(parts) >= 2:
+                    meta["domain"] = parts[1]
+            elif stripped.startswith("| **创建时间** |"):
+                parts = [p.strip() for p in stripped.split("|") if p.strip()]
+                if len(parts) >= 2:
+                    meta["created_at"] = parts[1]
+    except Exception:
+        pass
+    return meta
 
 
 # ── commands ──
@@ -216,6 +323,99 @@ def cmd_install(args: argparse.Namespace) -> None:
     print("Done. The skill is now active for Claude Code + all AGENTS.md-compatible tools.")
 
 
+def cmd_list(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    schema = path / "SCHEMA.md"
+    if not schema.exists():
+        print(f"❌ 未找到 SCHEMA.md: {path} 不是一个 wiki 目录")
+        sys.exit(1)
+
+    docs = collect_documents(path)
+
+    # Filter by category
+    if hasattr(args, "category") and args.category:
+        docs = [d for d in docs if d["category"] == args.category]
+
+    if args.format == "json":
+        import json
+        meta = read_schema_meta(path)
+        output = {
+            "wiki": meta,
+            "total": len(docs),
+            "documents": docs,
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if getattr(args, "pretty", False) else None))
+        return
+
+    # Table format
+    meta = read_schema_meta(path)
+    print(f"\n📚 {meta['name']} — {meta['domain']}")
+    print(f"   共 {len(docs)} 篇文档\n")
+
+    current_cat = None
+    for d in docs:
+        if d["category"] != current_cat:
+            current_cat = d["category"]
+            print(f"  [{d['category_label']}] ({d['category']}/)")
+        tags_str = f" [{', '.join(d['tags'])}]" if d["tags"] else ""
+        links_str = f"  🔗{d['links_count']}" if d["links_count"] > 0 else ""
+        print(f"    {d['title']}")
+        print(f"    ├─ {d['file']}  ({d['size']}B, {d['modified']}){tags_str}{links_str}")
+        print()
+
+
+def cmd_index(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    schema = path / "SCHEMA.md"
+    if not schema.exists():
+        print(f"❌ 未找到 SCHEMA.md: {path} 不是一个 wiki 目录")
+        sys.exit(1)
+
+    import json
+
+    docs = collect_documents(path)
+    meta = read_schema_meta(path)
+
+    # Group by category
+    by_category = {}
+    for d in docs:
+        cat = d["category"]
+        if cat not in by_category:
+            by_category[cat] = {
+                "category": cat,
+                "category_label": d["category_label"],
+                "count": 0,
+                "documents": [],
+            }
+        by_category[cat]["count"] += 1
+        by_category[cat]["documents"].append(d)
+
+    # Collect all tags
+    all_tags = set()
+    for d in docs:
+        for t in d.get("tags", []):
+            all_tags.add(t)
+
+    index = {
+        "wiki": meta,
+        "generated_at": now(),
+        "total_documents": len(docs),
+        "categories": [by_category[k] for k in DIRS if k in by_category],
+        "tags": sorted(all_tags),
+    }
+
+    output_path = expand(args.output or str(path / "queries" / "index.json"))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    indent = 2 if args.pretty else None
+    output_path.write_text(json.dumps(index, ensure_ascii=False, indent=indent), encoding="utf-8")
+
+    print(f"✅ 索引已生成: {output_path}")
+    print(f"   文档总数: {len(docs)}")
+    print(f"   分类数: {len(by_category)}")
+    print(f"   标签: {', '.join(sorted(all_tags)) if all_tags else '无'}")
+
+
 # ── CLI ──
 
 def main() -> None:
@@ -242,6 +442,17 @@ def main() -> None:
     p_install = sub.add_parser("install", help="安装 skill 到目标项目")
     p_install.add_argument("path", help="项目路径")
 
+    p_list = sub.add_parser("list", help="列举所有知识文档")
+    p_list.add_argument("path", nargs="?", default=".")
+    p_list.add_argument("--format", default="table", choices=["table", "json"])
+    p_list.add_argument("--category", default="", help="过滤指定目录 (raw/entities/concepts/relations/queries/drafts)")
+    p_list.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
+
+    p_index = sub.add_parser("index", help="生成结构化 JSON 索引")
+    p_index.add_argument("path", nargs="?", default=".")
+    p_index.add_argument("--output", default="", help="输出路径 (默认 queries/index.json)")
+    p_index.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -255,6 +466,10 @@ def main() -> None:
         cmd_bootstrap(args)
     elif args.command == "install":
         cmd_install(args)
+    elif args.command == "list":
+        cmd_list(args)
+    elif args.command == "index":
+        cmd_index(args)
 
 
 if __name__ == "__main__":

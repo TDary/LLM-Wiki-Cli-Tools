@@ -1,6 +1,7 @@
 ---
 name: wiki
-description: v0.1.0 — 创建、查询和管理本地知识库，纯文件模式，零依赖
+version: 1.0.2
+description: 创建、查询和管理本地知识库，纯文件模式，零依赖
 ---
 
 # Local Wiki Skill v0.1.0
@@ -35,6 +36,8 @@ local-wiki-skill/
 | `python scripts/wiki.py init [path] [domain]` | Create directory structure + templates |
 | `python scripts/wiki.py sync [path]` | Confirm local-only status |
 | `python scripts/wiki.py bootstrap <path>` | Bootstrap at a given path |
+| `python scripts/wiki.py list [path]` | List all documents (table or JSON) |
+| `python scripts/wiki.py index [path]` | Generate JSON index for frontend |
 
 ## Quick Check
 
@@ -72,6 +75,46 @@ Local mode — no sync needed. The script confirms files are the sole source of 
 ```
 
 Bootstrap a wiki at an existing or new path. Equivalent to `init` with the given path.
+
+## /wiki list
+
+```
+/wiki list [path] [--format table|json] [--category CAT] [--pretty]
+```
+
+List all knowledge documents in the wiki. Default: table format grouped by category.
+
+**Options:**
+- `--format json` — output as JSON (with `--pretty` for indentation)
+- `--category concepts` — filter to a single directory
+
+Output includes: title, file path, category, size, last modified time, tags, wiki-link count.
+
+## /wiki index
+
+```
+/wiki index [path] [--output index.json] [--pretty]
+```
+
+Generate a structured JSON index for frontend consumption.
+
+Output (default `queries/index.json`):
+```json
+{
+  "wiki": {"name": "...", "domain": "...", "created_at": "..."},
+  "generated_at": "2026-05-18 14:30:00",
+  "total_documents": 12,
+  "categories": [
+    {
+      "category": "concepts",
+      "category_label": "概念",
+      "count": 5,
+      "documents": [...]
+    }
+  ],
+  "tags": ["AI", "tech"]
+}
+```
 
 ## Conventions
 
