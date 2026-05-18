@@ -3,6 +3,7 @@ wiki-tools
 wiki-tools.exe
 wiki-tools-local
 wiki-tools-local.exe
+/dist/*
 
 # IDE
 .vscode/
