@@ -1,7 +1,8 @@
 param(
     [switch]$Local,
     [string]$Dir = "$env:USERPROFILE\.local\bin",
-    [string]$Skill
+    [string]$Skill,
+    [string]$Agents
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,6 +43,14 @@ if ($Skill) {
     New-Item -ItemType Directory -Force -Path (Split-Path $SkillDst -Parent) | Out-Null
     Copy-Item -Force $SkillSrc $SkillDst
     Write-Host "Skill installed: $SkillDst"
+}
+
+# AGENTS.md
+if ($Agents) {
+    $AgentsSrc = Join-Path $ScriptDir "platform-adapters\AGENTS.md"
+    $AgentsDst = Join-Path $Agents "AGENTS.md"
+    Copy-Item -Force $AgentsSrc $AgentsDst
+    Write-Host "AGENTS.md installed: $AgentsDst"
 }
 
 Write-Host ""

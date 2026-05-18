@@ -94,7 +94,29 @@ wiki-root/
 
 ## Platform Adapters
 
-`platform-adapters/` contains agent instructions for other AI coding tools (Cursor, Windsurf, Copilot, OpenClaw). Copy or reference `AGENTS.md` as your tool requires.
+`platform-adapters/` contains agent instructions for other AI coding tools. Each tool reads from a different location:
+
+| Tool | Copy to |
+|------|---------|
+| **Claude Code** | `.claude/skills/wiki.md` (use `skills/wiki.md` — the native skill) |
+| **Claude Code** (project rules) | `CLAUDE.md` in project root |
+| **GitHub Copilot** | `AGENTS.md` in project root, or `.github/copilot-instructions.md` |
+| **Cursor** | `AGENTS.md` in project root, or `.cursor/rules/wiki.mdc` |
+| **Windsurf** | `AGENTS.md` in project root |
+| **OpenClaw** | `AGENTS.md` in project root |
+
+Quick copy:
+
+```bash
+# Claude Code native skill
+cp skills/wiki.md ~/my-project/.claude/skills/
+
+# Most other tools (Copilot, Cursor, Windsurf, OpenClaw)
+cp platform-adapters/AGENTS.md ~/my-project/
+
+# Claude Code project rules
+cp platform-adapters/CLAUDE.md ~/my-project/
+```
 
 ## License
 

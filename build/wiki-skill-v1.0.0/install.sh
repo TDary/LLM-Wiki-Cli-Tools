@@ -7,14 +7,16 @@ BIN_NAME="wiki-tools"
 LOCAL=false
 TARGET_DIR=""
 SKILL_TARGET=""
+AGENTS_TARGET=""
 
 usage() {
-    echo "Usage: ./install.sh [--local] [--dir PATH] [--skill PROJECT_PATH]"
+    echo "Usage: ./install.sh [--local] [--dir PATH] [--skill PROJECT_PATH] [--agents PROJECT_PATH]"
     echo ""
-    echo "  --local       Install the local-only variant (no Git dependency)"
-    echo "  --dir PATH    Install binary to PATH (default: ~/.local/bin, macOS: /usr/local/bin)"
-    echo "  --skill PATH  Also copy the skill file to project/.claude/skills/"
-    echo "  -h, --help    Show this help"
+    echo "  --local          Install the local-only variant (no Git dependency)"
+    echo "  --dir PATH       Install binary to PATH (default: ~/.local/bin, macOS: /usr/local/bin)"
+    echo "  --skill PATH     Also copy the skill file to project/.claude/skills/"
+    echo "  --agents PATH    Also copy AGENTS.md to project root (for Copilot/Cursor/Windsurf/OpenClaw)"
+    echo "  -h, --help       Show this help"
     exit 0
 }
 
@@ -23,6 +25,7 @@ while [[ $# -gt 0 ]]; do
         --local) LOCAL=true; shift ;;
         --dir) TARGET_DIR="$2"; shift 2 ;;
         --skill) SKILL_TARGET="$2"; shift 2 ;;
+        --agents) AGENTS_TARGET="$2"; shift 2 ;;
         -h|--help) usage ;;
         *) echo "Unknown: $1"; usage ;;
     esac
@@ -92,6 +95,14 @@ if [[ -n "$SKILL_TARGET" ]]; then
     mkdir -p "$(dirname "$SKILL_DST")"
     cp "$SKILL_SRC" "$SKILL_DST"
     echo "Skill installed: $SKILL_DST"
+fi
+
+# AGENTS.md
+if [[ -n "$AGENTS_TARGET" ]]; then
+    AGENTS_SRC="$SCRIPT_DIR/platform-adapters/AGENTS.md"
+    AGENTS_DST="$AGENTS_TARGET/AGENTS.md"
+    cp "$AGENTS_SRC" "$AGENTS_DST"
+    echo "AGENTS.md installed: $AGENTS_DST"
 fi
 
 echo ""

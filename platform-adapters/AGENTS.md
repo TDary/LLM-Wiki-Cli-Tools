@@ -2,8 +2,20 @@
 
 > Platform-agnostic agent instructions.  
 > Works with: OpenClaw, Cursor, Windsurf, GitHub Copilot, and any agent that reads AGENTS.md.
->
-> **Claude Code users**: prefer the native `/wiki` skill (`.claude/skills/wiki.md`) — it operates directly without the Go binary. The CLI tool below is for daemon mode and non-Claude environments.
+
+## Installation
+
+Copy this file to your project root. The location depends on your tool:
+
+| Tool | Where to put this file |
+|------|------------------------|
+| **GitHub Copilot** | `<project>/AGENTS.md` or `.github/copilot-instructions.md` |
+| **Cursor** | `<project>/AGENTS.md` or `.cursor/rules/wiki.mdc` |
+| **Windsurf** | `<project>/AGENTS.md` |
+| **OpenClaw** | `<project>/AGENTS.md` |
+| **Claude Code** | Prefer the native skill: copy `skills/wiki.md` to `.claude/skills/`. For project rules: `<project>/CLAUDE.md` |
+
+> **Claude Code users**: the native `/wiki` skill (`.claude/skills/wiki.md`) is the preferred entry point — it operates directly without the Go binary. The CLI tool below is for daemon mode and non-Claude environments.
 
 ## Quick Start
 
