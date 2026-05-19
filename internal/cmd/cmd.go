@@ -8,7 +8,7 @@ import (
 )
 
 // Version is the tool version.
-const Version = "1.0.5"
+const Version = "1.1.0"
 
 // Commands maps command names to handlers.
 var Commands = map[string]func([]string){}
@@ -68,6 +68,9 @@ func PrintUsage() {
   trace       溯源追踪文档上下游引用链
   fix         结构层自愈检查与修复
   index       生成结构化 JSON 索引
+  rename      重命名文档并更新所有引用
+  tags        列出所有标签及使用统计
+  stats       知识库统计概览
 
 全局选项:
   -h, --help     显示帮助
@@ -77,11 +80,16 @@ func PrintUsage() {
   wiki-tools init ~/team-wiki "团队共享知识库"
   wiki-tools list ~/team-wiki --tags Unity,performance
   wiki-tools search "关键词" ~/team-wiki
+  wiki-tools search "pattern" ~/team-wiki --regex
   wiki-tools backlinks unity-ugui ~/team-wiki
   wiki-tools health ~/team-wiki
   wiki-tools fix ~/team-wiki --apply
+  wiki-tools fix ~/team-wiki --apply --interactive
   wiki-tools trace draw-call-optimization ~/team-wiki
   wiki-tools index ~/team-wiki --pretty
+  wiki-tools rename old-page new-page ~/team-wiki --dry-run
+  wiki-tools tags ~/team-wiki --sort count
+  wiki-tools stats ~/team-wiki
 
 获取子命令帮助:
   wiki-tools <command> --help

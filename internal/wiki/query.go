@@ -270,6 +270,34 @@ func SearchDocuments(docs []Doc, keyword string) []SearchResult {
 	return results
 }
 
+// SearchDocumentsRegex searches docs by regex pattern.
+func SearchDocumentsRegex(docs []Doc, pattern string) ([]SearchResult, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("无效正则表达式: %w", err)
+	}
+	var results []SearchResult
+	for _, doc := range docs {
+		var matches []Match
+		if re.MatchString(doc.Title) {
+			matches = append(matches, Match{Line: 0, Content: doc.Title})
+		}
+		for lineNo, line := range strings.Split(doc.Text, "\n") {
+			if re.MatchString(line) {
+				matches = append(matches, Match{Line: lineNo + 1, Content: strings.TrimSpace(line)})
+			}
+		}
+		if len(matches) > 0 {
+			results = append(results, SearchResult{
+				Doc:        doc,
+				Matches:    matches,
+				MatchCount: len(matches),
+			})
+		}
+	}
+	return results, nil
+}
+
 // LinkGraph holds outbound links and doc info.
 type LinkGraph struct {
 	Outbound map[string][]string      // stem -> [target_stems]
@@ -426,4 +454,176 @@ var SystemFiles = map[string]bool{
 // StripInternal removes _text-like fields (not needed for Go, but kept for API parity).
 func StripInternal(docs []Doc) []Doc {
 	return docs
+}
+
+// HealthConfig holds configurable weights for health checks.
+type HealthConfig struct {
+	Weights map[string]int
+}
+
+// DefaultHealthWeights returns the default health check weights.
+func DefaultHealthWeights() map[string]int {
+	return map[string]int{
+		"orphan":      3,
+		"broken_link": 5,
+		"no_tag":      1,
+		"low_link":    2,
+		"empty_doc":   2,
+		"self_link":   1,
+	}
+}
+
+// ReadHealthConfig parses health check weights from SCHEMA.md.
+func ReadHealthConfig(wikiPath string) HealthConfig {
+	config := HealthConfig{Weights: DefaultHealthWeights()}
+	schemaPath := filepath.Join(wikiPath, "SCHEMA.md")
+	data, err := os.ReadFile(schemaPath)
+	if err != nil {
+		return config
+	}
+
+	lines := strings.Split(string(data), "\n")
+	inYaml := false
+	inHealthSection := false
+	yamlLines := []string{}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") {
+			inHealthSection = strings.Contains(trimmed, "健康检查")
+			inYaml = false
+			continue
+		}
+		if inHealthSection && trimmed == "```yaml" {
+			inYaml = true
+			continue
+		}
+		if inYaml && trimmed == "```" {
+			break
+		}
+		if inYaml && inHealthSection {
+			yamlLines = append(yamlLines, line)
+		}
+	}
+
+	// Parse simple "key: value" pairs from yaml block
+	for _, yl := range yamlLines {
+		yl = strings.TrimSpace(yl)
+		if yl == "weights:" || yl == "" {
+			continue
+		}
+		if idx := strings.Index(yl, ":"); idx > 0 {
+			key := strings.TrimSpace(yl[:idx])
+			val := strings.TrimSpace(yl[idx+1:])
+			var n int
+			if _, err := fmt.Sscanf(val, "%d", &n); err == nil && n > 0 {
+				config.Weights[key] = n
+			}
+		}
+	}
+
+	return config
+}
+
+// CustomCheck defines a user-defined health check.
+type CustomCheck struct {
+	Name        string `json:"name"`
+	Command     string `json:"command"`
+	Description string `json:"description"`
+	Weight      int    `json:"weight"`
+}
+
+// ReadCustomChecks parses custom health checks from SCHEMA.md.
+func ReadCustomChecks(wikiPath string) []CustomCheck {
+	schemaPath := filepath.Join(wikiPath, "SCHEMA.md")
+	data, err := os.ReadFile(schemaPath)
+	if err != nil {
+		return nil
+	}
+
+	lines := strings.Split(string(data), "\n")
+	inYaml := false
+	inCustomSection := false
+	yamlLines := []string{}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") {
+			inCustomSection = strings.Contains(trimmed, "自定义检查")
+			inYaml = false
+			continue
+		}
+		if inCustomSection && trimmed == "```yaml" {
+			inYaml = true
+			continue
+		}
+		if inYaml && trimmed == "```" {
+			break
+		}
+		if inYaml && inCustomSection {
+			yamlLines = append(yamlLines, line)
+		}
+	}
+
+	var checks []CustomCheck
+	var current CustomCheck
+	for _, yl := range yamlLines {
+		yl = strings.TrimSpace(yl)
+		if yl == "checks:" || yl == "" {
+			continue
+		}
+		// Handle "- key: value" list item syntax
+		if strings.HasPrefix(yl, "- ") {
+			// Save previous check if any
+			if current.Name != "" {
+				checks = append(checks, current)
+			}
+			current = CustomCheck{Weight: 1}
+			// Parse "- key: value"
+			item := strings.TrimPrefix(yl, "- ")
+			if idx := strings.Index(item, ":"); idx > 0 {
+				key := strings.TrimSpace(item[:idx])
+				val := strings.TrimSpace(item[idx+1:])
+				val = strings.Trim(val, `"'`)
+				switch key {
+				case "name":
+					current.Name = val
+				case "command":
+					current.Command = val
+				case "description":
+					current.Description = val
+				case "weight":
+					var n int
+					if _, err := fmt.Sscanf(val, "%d", &n); err == nil && n > 0 {
+						current.Weight = n
+					}
+				}
+			}
+			continue
+		}
+		// Handle "  key: value" indented properties
+		if idx := strings.Index(yl, ":"); idx > 0 {
+			key := strings.TrimSpace(yl[:idx])
+			val := strings.TrimSpace(yl[idx+1:])
+			val = strings.Trim(val, `"'`)
+			switch key {
+			case "name":
+				current.Name = val
+			case "command":
+				current.Command = val
+			case "description":
+				current.Description = val
+			case "weight":
+				var n int
+				if _, err := fmt.Sscanf(val, "%d", &n); err == nil && n > 0 {
+					current.Weight = n
+				}
+			}
+		}
+	}
+	if current.Name != "" {
+		checks = append(checks, current)
+	}
+
+	return checks
 }

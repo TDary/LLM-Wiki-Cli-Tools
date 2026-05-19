@@ -162,9 +162,10 @@ wiki-tools search <KEYWORD> [WIKI_PATH] [OPTIONS]
 |------|------|
 | `--format table\|json` | 输出格式（默认 table） |
 | `--no-raw` | 排除 raw/ 目录 |
+| `--regex` | 使用正则表达式搜索 |
 | `--pretty` | JSON 缩进美化 |
 
-大小写不敏感子串匹配，搜索标题和正文内容，返回匹配行及行号。
+大小写不敏感子串匹配（默认）或正则匹配（`--regex`），搜索标题和正文内容，返回匹配行及行号。
 
 ### `backlinks` — 反向链接
 
@@ -190,14 +191,16 @@ wiki-tools health [WIKI_PATH] [OPTIONS]
 
 综合健康评分（0-100），检查项：
 
-| 检查项 | 扣分规则 |
+| 检查项 | 默认权重 |
 |--------|----------|
-| 孤立文档 | 每篇 -3 分 |
-| 断链 | 每处 -5 分 |
-| 无标签文档 | 每篇 -1 分 |
-| 链接不足（< 2 条） | 每篇 -2 分 |
-| 空文档（< 50 字节） | 每篇 -2 分 |
-| 自引用链接 | 每处 -1 分 |
+| 孤立文档 | 3 |
+| 断链 | 5 |
+| 无标签文档 | 1 |
+| 链接不足（< 2 条） | 2 |
+| 空文档（< 50 字节） | 2 |
+| 自引用链接 | 1 |
+
+权重可在 SCHEMA.md 的 `## 健康检查` yaml 块中自定义。还支持 `## 自定义检查` 定义外部命令检查插件（每条命令最多 5 秒超时）。
 
 ### `trace` — 溯源追踪
 
@@ -215,7 +218,7 @@ wiki-tools trace <PAGE> [WIKI_PATH] [OPTIONS]
 ### `fix` — 结构层自愈
 
 ```bash
-wiki-tools fix [WIKI_PATH] [--apply] [OPTIONS]
+wiki-tools fix [WIKI_PATH] [--apply] [--interactive|-i] [OPTIONS]
 ```
 
 | 检查项 | 自动修复 |
@@ -223,7 +226,7 @@ wiki-tools fix [WIKI_PATH] [--apply] [OPTIONS]
 | 断链 | 匹配最近似页面名，建议替换 |
 | 命名不规范 | 下划线 → 连字符（`[[unity_ugui]]` → `[[unity-ugui]]`） |
 
-默认 dry-run 预览模式，加 `--apply` 执行修复。
+默认 dry-run 预览模式，加 `--apply` 执行修复。`--interactive` 模式下每条修复前等待确认（y/n/s）。
 
 ### `index` — 生成 JSON 索引
 
@@ -232,6 +235,30 @@ wiki-tools index [WIKI_PATH] [--output FILE] [--pretty]
 ```
 
 输出结构化 JSON 索引（默认 `queries/index.json`），供前端页面消费。
+
+### `rename` — 重命名文档
+
+```bash
+wiki-tools rename <old-name> <new-name> [WIKI_PATH] [--dry-run] [--format table|json] [--pretty]
+```
+
+重命名文档文件并全局更新所有 `[[wikilinks]]` 引用。默认 dry-run 预览模式，去掉 `--dry-run` 执行重命名。
+
+### `tags` — 标签统计
+
+```bash
+wiki-tools tags [WIKI_PATH] [--format table|json] [--pretty] [--sort count|name]
+```
+
+列出所有标签及使用次数、关联文档。默认按使用次数降序排列。
+
+### `stats` — 知识库统计
+
+```bash
+wiki-tools stats [WIKI_PATH] [--format table|json] [--pretty]
+```
+
+显示知识库概览：文档数（按分类）、标签统计、链接密度、孤立文档占比、总文件大小等。
 
 ---
 
@@ -291,7 +318,10 @@ wiki-tools/
 │   │   ├── health.go          # health 命令
 │   │   ├── trace.go           # trace 命令
 │   │   ├── fix.go             # fix 命令
-│   │   └── index.go           # index 命令
+│   │   ├── index.go           # index 命令
+│   │   ├── rename.go          # rename 命令
+│   │   ├── tags.go            # tags 命令
+│   │   └── stats.go           # stats 命令
 │   ├── git/
 │   │   └── git.go             # Git 操作封装（!localonly）
 │   └── wiki/

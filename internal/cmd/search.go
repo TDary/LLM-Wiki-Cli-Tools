@@ -15,13 +15,14 @@ func searchCmd(args []string) {
 	format := "table"
 	noRaw := false
 	pretty := false
+	regex := false
 	keyword := ""
 	wikiPath := ""
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-h", "--help":
-			fmt.Println("用法: wiki-tools search <keyword> [WIKI_PATH] [--format table|json] [--no-raw] [--pretty]")
+			fmt.Println("用法: wiki-tools search <keyword> [WIKI_PATH] [--format table|json] [--no-raw] [--regex] [--pretty]")
 			os.Exit(0)
 		case "--format":
 			i++; if i < len(args) { format = args[i] }
@@ -29,6 +30,8 @@ func searchCmd(args []string) {
 			noRaw = true
 		case "--pretty":
 			pretty = true
+		case "--regex":
+			regex = true
 		default:
 			if !strings.HasPrefix(args[i], "-") {
 				if keyword == "" {
@@ -65,7 +68,16 @@ func searchCmd(args []string) {
 		docs = filtered
 	}
 
-	results := wiki.SearchDocuments(docs, keyword)
+	var results []wiki.SearchResult
+	if regex {
+		results, err = wiki.SearchDocumentsRegex(docs, keyword)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		results = wiki.SearchDocuments(docs, keyword)
+	}
 
 	if format == "json" {
 		meta := wiki.ReadSchemaMeta(p)

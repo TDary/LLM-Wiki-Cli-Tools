@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -28,12 +29,13 @@ func fixCmd(args []string) {
 	format := "table"
 	pretty := false
 	apply := false
+	interactive := false
 	wikiPath := ""
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-h", "--help":
-			fmt.Println("用法: wiki-tools fix [WIKI_PATH] [--apply] [--format table|json] [--pretty]")
+			fmt.Println("用法: wiki-tools fix [WIKI_PATH] [--apply] [--interactive|-i] [--format table|json] [--pretty]")
 			os.Exit(0)
 		case "--format":
 			i++; if i < len(args) { format = args[i] }
@@ -41,6 +43,8 @@ func fixCmd(args []string) {
 			pretty = true
 		case "--apply":
 			apply = true
+		case "--interactive", "-i":
+			interactive = true
 		default:
 			if !strings.HasPrefix(args[i], "-") && wikiPath == "" {
 				wikiPath = args[i]
@@ -139,10 +143,11 @@ func fixCmd(args []string) {
 	if format == "json" {
 		meta := wiki.ReadSchemaMeta(p)
 		output := map[string]interface{}{
-			"wiki":    meta,
-			"total":   len(fixes),
-			"dry_run": !apply,
-			"fixes":   fixes,
+			"wiki":        meta,
+			"total":       len(fixes),
+			"dry_run":     !apply,
+			"interactive": interactive,
+			"fixes":       fixes,
 		}
 		enc := json.NewEncoder(os.Stdout)
 		if pretty {
@@ -154,7 +159,11 @@ func fixCmd(args []string) {
 
 	mode := "预览"
 	if apply {
-		mode = "执行"
+		if interactive {
+			mode = "交互执行"
+		} else {
+			mode = "执行"
+		}
 	}
 	fmt.Printf("\n🔧 自愈检查 — %s模式\n", mode)
 	fmt.Printf("   发现 %d 个可修复项\n\n", len(fixes))
@@ -173,10 +182,39 @@ func fixCmd(args []string) {
 		}
 	}
 
+	// Track skipped types for 's' option
+	skipTypes := make(map[string]bool)
+	reader := bufio.NewReader(os.Stdin)
+	appliedCount := 0
+	skippedCount := 0
+
 	if len(broken) > 0 {
 		fmt.Printf("   ── 断链修复 (%d 处) ──\n", len(broken))
 		for _, f := range broken {
 			if apply {
+				if interactive && !skipTypes[f.Type] {
+					status := "✅ 可修复"
+					if f.Suggestion == "" {
+						status = "⚠️  需手动"
+					}
+					fmt.Printf("   %s  %s: %s\n", status, f.File, f.Action)
+					fmt.Print("   确认? [y/n/s=跳过剩余断链] ")
+					input, _ := reader.ReadString('\n')
+					input = strings.TrimSpace(strings.ToLower(input))
+					switch input {
+					case "s":
+						skipTypes[f.Type] = true
+						skippedCount++
+						fmt.Printf("   ⏭️  跳过剩余断链修复\n")
+						continue
+					case "n":
+						skippedCount++
+						fmt.Printf("   ⏭️  已跳过\n")
+						continue
+					}
+					// "y" or empty or anything else -> proceed
+				}
+
 				fp := filepath.Join(p, f.File)
 				data, err := os.ReadFile(fp)
 				if err != nil {
@@ -188,6 +226,7 @@ func fixCmd(args []string) {
 					newText := strings.ReplaceAll(text, "[["+f.Original+"]]", "[["+info.Title+"]]")
 					os.WriteFile(fp, []byte(newText), 0644)
 					fmt.Printf("   ✅ %s: %s\n", f.File, f.Action)
+					appliedCount++
 				} else {
 					fmt.Printf("   ⏭️  %s: %s (需手动处理)\n", f.File, f.Action)
 				}
@@ -206,6 +245,24 @@ func fixCmd(args []string) {
 		fmt.Printf("   ── 命名规范化 (%d 处) ──\n", len(norm))
 		for _, f := range norm {
 			if apply {
+				if interactive && !skipTypes[f.Type] {
+					fmt.Printf("   ✅  %s: %s\n", f.File, f.Action)
+					fmt.Print("   确认? [y/n/s=跳过剩余规范化] ")
+					input, _ := reader.ReadString('\n')
+					input = strings.TrimSpace(strings.ToLower(input))
+					switch input {
+					case "s":
+						skipTypes[f.Type] = true
+						skippedCount++
+						fmt.Printf("   ⏭️  跳过剩余规范化\n")
+						continue
+					case "n":
+						skippedCount++
+						fmt.Printf("   ⏭️  已跳过\n")
+						continue
+					}
+				}
+
 				fp := filepath.Join(p, f.File)
 				data, err := os.ReadFile(fp)
 				if err != nil {
@@ -215,6 +272,7 @@ func fixCmd(args []string) {
 				newText := strings.ReplaceAll(text, "[["+f.Original+"]]", "[["+f.Suggestion+"]]")
 				os.WriteFile(fp, []byte(newText), 0644)
 				fmt.Printf("   ✅ %s: %s\n", f.File, f.Action)
+				appliedCount++
 			} else {
 				fmt.Printf("   ✅ 可修复  %s: %s\n", f.File, f.Action)
 			}
@@ -232,5 +290,10 @@ func fixCmd(args []string) {
 		manualCount := len(fixes) - autoCount
 		fmt.Printf("   💡 %d 项可自动修复，%d 项需手动处理。\n", autoCount, manualCount)
 		fmt.Println("      使用 --apply 执行自动修复。")
+		if !interactive {
+			fmt.Println("      使用 --interactive 逐条确认。")
+		}
+	} else if interactive {
+		fmt.Printf("   已应用 %d 项，跳过 %d 项。\n", appliedCount, skippedCount)
 	}
 }

@@ -1,12 +1,17 @@
 package cmd
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"time"
 
 	"wiki-tools/internal/wiki"
 )
@@ -48,6 +53,10 @@ func healthCmd(args []string) {
 
 	docs := wiki.CollectDocuments(p)
 	backlinks := wiki.BuildBacklinkMap(p)
+
+	// Read configurable weights
+	healthConfig := wiki.ReadHealthConfig(p)
+	w := healthConfig.Weights
 
 	var userDocs []wiki.Doc
 	for _, d := range docs {
@@ -153,12 +162,73 @@ func healthCmd(args []string) {
 		}
 	}
 
+	// Run custom checks
+	type CustomCheckResult struct {
+		Name        string   `json:"name"`
+		Description string   `json:"description"`
+		Weight      int      `json:"weight"`
+		Issues      []string `json:"issues"`
+		Count       int      `json:"count"`
+	}
+	customChecks := wiki.ReadCustomChecks(p)
+	var customResults []CustomCheckResult
+	customDeduction := 0
+
+	for _, check := range customChecks {
+		result := CustomCheckResult{
+			Name:        check.Name,
+			Description: check.Description,
+			Weight:      check.Weight,
+		}
+
+		if check.Command != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			var cmd *exec.Cmd
+			if runtime.GOOS == "windows" {
+				cmd = exec.CommandContext(ctx, "cmd", "/c", check.Command)
+			} else {
+				cmd = exec.CommandContext(ctx, "sh", "-c", check.Command)
+			}
+			cmd.Dir = p
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			cancel()
+
+			if err != nil && ctx.Err() == context.DeadlineExceeded {
+				result.Issues = []string{"命令超时（5 秒）"}
+				result.Count = 1
+			} else if stdout.Len() > 0 {
+				lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+				for _, line := range lines {
+					line = strings.TrimSpace(line)
+					if line != "" {
+						result.Issues = append(result.Issues, line)
+					}
+				}
+				result.Count = len(result.Issues)
+			}
+
+			if result.Count > 0 {
+				customDeduction += result.Count * check.Weight
+			}
+		}
+
+		customResults = append(customResults, result)
+	}
+
+	// Calculate score with configurable weights and sum of weights
 	total := len(userDocs)
 	if total == 0 {
 		total = 1
 	}
-	deductions := len(orphans)*3 + len(brokenLinks)*5 + len(noTags)*1 + len(lowLinks)*2 + len(emptyDocs)*2 + len(selfLinks)*1
-	score := 100 - deductions*100/(total*6)
+	sumWeights := w["orphan"] + w["broken_link"] + w["no_tag"] + w["low_link"] + w["empty_doc"] + w["self_link"]
+	if sumWeights == 0 {
+		sumWeights = 6
+	}
+	deductions := len(orphans)*w["orphan"] + len(brokenLinks)*w["broken_link"] + len(noTags)*w["no_tag"] + len(lowLinks)*w["low_link"] + len(emptyDocs)*w["empty_doc"] + len(selfLinks)*w["self_link"]
+	score := 100 - (deductions+customDeduction)*100/(total*sumWeights)
 	if score < 0 {
 		score = 0
 	}
@@ -172,6 +242,7 @@ func healthCmd(args []string) {
 			"wiki":            meta,
 			"score":           score,
 			"total_documents": len(userDocs),
+			"weights":         w,
 			"checks": map[string]interface{}{
 				"orphans":      map[string]interface{}{"count": len(orphans), "items": orphans},
 				"broken_links": map[string]interface{}{"count": len(brokenLinks), "items": brokenLinks},
@@ -179,6 +250,7 @@ func healthCmd(args []string) {
 				"low_links":    map[string]interface{}{"count": len(lowLinks), "items": lowLinks},
 				"empty_docs":   map[string]interface{}{"count": len(emptyDocs), "items": emptyDocs},
 				"self_links":   map[string]interface{}{"count": len(selfLinks), "items": selfLinks},
+				"custom":       customResults,
 			},
 		}
 		enc := json.NewEncoder(os.Stdout)
@@ -201,12 +273,21 @@ func healthCmd(args []string) {
 	meta := wiki.ReadSchemaMeta(p)
 	fmt.Printf("\n🏥 %s — 知识库健康报告\n", meta.Name)
 	fmt.Printf("   文档总数: %d\n\n", len(userDocs))
-	fmt.Printf("   %s 孤立文档:     %d 篇\n", statusIcon(len(orphans), 5), len(orphans))
-	fmt.Printf("   %s 断链:         %d 处\n", statusIcon(len(brokenLinks), 0), len(brokenLinks))
-	fmt.Printf("   %s 无标签文档:   %d 篇\n", statusIcon(len(noTags), 5), len(noTags))
-	fmt.Printf("   %s 链接不足:     %d 篇 (< 2 条链接)\n", statusIcon(len(lowLinks), 5), len(lowLinks))
-	fmt.Printf("   %s 空文档:       %d 篇 (< 50 字节)\n", statusIcon(len(emptyDocs), 3), len(emptyDocs))
-	fmt.Printf("   %s 自引用:       %d 处\n", statusIcon(len(selfLinks), 0), len(selfLinks))
+	fmt.Printf("   %s 孤立文档:     %d 篇 (权重 %d)\n", statusIcon(len(orphans), 5), len(orphans), w["orphan"])
+	fmt.Printf("   %s 断链:         %d 处 (权重 %d)\n", statusIcon(len(brokenLinks), 0), len(brokenLinks), w["broken_link"])
+	fmt.Printf("   %s 无标签文档:   %d 篇 (权重 %d)\n", statusIcon(len(noTags), 5), len(noTags), w["no_tag"])
+	fmt.Printf("   %s 链接不足:     %d 篇 (< 2 条链接, 权重 %d)\n", statusIcon(len(lowLinks), 5), len(lowLinks), w["low_link"])
+	fmt.Printf("   %s 空文档:       %d 篇 (< 50 字节, 权重 %d)\n", statusIcon(len(emptyDocs), 3), len(emptyDocs), w["empty_doc"])
+	fmt.Printf("   %s 自引用:       %d 处 (权重 %d)\n", statusIcon(len(selfLinks), 0), len(selfLinks), w["self_link"])
+
+	for _, cr := range customResults {
+		icon := "✅"
+		if cr.Count > 0 {
+			icon = "⚠️"
+		}
+		fmt.Printf("   %s %-14s %d 处 (权重 %d)\n", icon, cr.Name+":", cr.Count, cr.Weight)
+	}
+
 	fmt.Printf("\n   健康评分: %d/100\n", score)
 
 	if len(brokenLinks) > 0 {
@@ -265,6 +346,23 @@ func healthCmd(args []string) {
 		}
 	}
 
+	// Show custom check details
+	for _, cr := range customResults {
+		if cr.Count > 0 {
+			fmt.Printf("\n   ── %s ──\n", cr.Name)
+			limit := 10
+			if len(cr.Issues) < limit {
+				limit = len(cr.Issues)
+			}
+			for _, issue := range cr.Issues[:limit] {
+				fmt.Printf("   ⚠️  %s\n", issue)
+			}
+			if len(cr.Issues) > 10 {
+				fmt.Printf("   ... 共 %d 处\n", len(cr.Issues))
+			}
+		}
+	}
+
 	var issues []string
 	if len(brokenLinks) > 0 {
 		issues = append(issues, "修复断链（目标页面不存在）")
@@ -283,6 +381,11 @@ func healthCmd(args []string) {
 	}
 	if len(selfLinks) > 0 {
 		issues = append(issues, "移除自引用链接（页面不应链接到自身）")
+	}
+	for _, cr := range customResults {
+		if cr.Count > 0 {
+			issues = append(issues, cr.Name+": "+cr.Description)
+		}
 	}
 
 	if len(issues) > 0 {
