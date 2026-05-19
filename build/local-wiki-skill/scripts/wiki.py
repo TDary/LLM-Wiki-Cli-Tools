@@ -581,6 +581,8 @@ def cmd_orphans(args: argparse.Namespace) -> None:
     system_files = {"readme.md", "log.md", "schema.md"}
     orphans = []
     for doc in docs:
+        if doc["category"] == "raw":
+            continue
         stem = Path(doc["file"]).stem.lower()
         if stem in system_files:
             continue
@@ -623,9 +625,9 @@ def cmd_health(args: argparse.Namespace) -> None:
     docs = collect_documents(path)
     backlinks = build_backlink_map(path)
 
-    # Exclude system files
+    # Exclude system files and raw/ (immutable source material)
     system_files = {"readme.md", "log.md", "schema.md"}
-    user_docs = [d for d in docs if Path(d["file"]).stem.lower() not in system_files]
+    user_docs = [d for d in docs if d["category"] != "raw" and Path(d["file"]).stem.lower() not in system_files]
 
     # Build set of all existing page stems for broken link detection
     existing_stems = {Path(d["file"]).stem.lower() for d in docs}
@@ -666,6 +668,25 @@ def cmd_health(args: argparse.Namespace) -> None:
     # Check 4: Documents with < 2 outbound links
     low_links = [d for d in user_docs if d["links_count"] < 2]
 
+    # Check 5: Empty documents (< 50 bytes of content)
+    empty_docs = [d for d in user_docs if len(d.get("_text", "").strip()) < 50]
+
+    # Check 6: Self-referential links (page links to itself)
+    self_links = []
+    for d in user_docs:
+        self_stem = Path(d["file"]).stem.lower()
+        text = d.get("_text", "")
+        for line_no, line in enumerate(text.splitlines(), 1):
+            for m in re.finditer(r"\[\[(.+?)\]\]", line):
+                target = m.group(1).strip().lower().replace(" ", "-")
+                if target == self_stem:
+                    self_links.append({
+                        "file": d["file"],
+                        "title": d["title"],
+                        "line": line_no,
+                        "link": m.group(1),
+                    })
+
     # Calculate health score (100 = perfect)
     total_checks = len(user_docs) if user_docs else 1
     deductions = 0
@@ -673,7 +694,9 @@ def cmd_health(args: argparse.Namespace) -> None:
     deductions += len(broken_links) * 5     # -5 per broken link (most severe)
     deductions += len(no_tags) * 1          # -1 per untagged doc
     deductions += len(low_links) * 2        # -2 per low-link doc
-    score = max(0, min(100, 100 - int(deductions * 100 / (total_checks * 4))))
+    deductions += len(empty_docs) * 2       # -2 per empty doc
+    deductions += len(self_links) * 1       # -1 per self-link
+    score = max(0, min(100, 100 - int(deductions * 100 / (total_checks * 6))))
 
     # Status icon
     def status_icon(count: int, threshold: int = 0) -> str:
@@ -696,6 +719,8 @@ def cmd_health(args: argparse.Namespace) -> None:
                 "broken_links": {"count": len(broken_links), "items": broken_links},
                 "no_tags": {"count": len(no_tags), "items": _strip_internal(no_tags)},
                 "low_links": {"count": len(low_links), "items": _strip_internal(low_links)},
+                "empty_docs": {"count": len(empty_docs), "items": _strip_internal(empty_docs)},
+                "self_links": {"count": len(self_links), "items": self_links},
             },
         }
         print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
@@ -710,6 +735,8 @@ def cmd_health(args: argparse.Namespace) -> None:
     print(f"   {status_icon(len(broken_links))} 断链:         {len(broken_links)} 处")
     print(f"   {status_icon(len(no_tags), 5)} 无标签文档:   {len(no_tags)} 篇")
     print(f"   {status_icon(len(low_links), 5)} 链接不足:     {len(low_links)} 篇 (< 2 条链接)")
+    print(f"   {status_icon(len(empty_docs), 3)} 空文档:       {len(empty_docs)} 篇 (< 50 字节)")
+    print(f"   {status_icon(len(self_links))} 自引用:       {len(self_links)} 处")
     print()
     print(f"   健康评分: {score}/100")
 
@@ -728,6 +755,21 @@ def cmd_health(args: argparse.Namespace) -> None:
         if len(orphans) > 10:
             print(f"   ... 共 {len(orphans)} 篇孤立文档")
 
+    if empty_docs:
+        print(f"\n   ── 空文档 ──")
+        for d in empty_docs[:10]:
+            text = d.get("_text", "")
+            print(f"   📄 {d['title']}  ({d['file']}, {len(text.strip())} 字节)")
+        if len(empty_docs) > 10:
+            print(f"   ... 共 {len(empty_docs)} 篇空文档")
+
+    if self_links:
+        print(f"\n   ── 自引用 ──")
+        for sl in self_links[:10]:
+            print(f"   🔄 {sl['file']} (L{sl['line']}): [[{sl['link']}]] → 自身")
+        if len(self_links) > 10:
+            print(f"   ... 共 {len(self_links)} 处自引用")
+
     # Suggestions
     issues = []
     if broken_links:
@@ -738,6 +780,10 @@ def cmd_health(args: argparse.Namespace) -> None:
         issues.append("给无标签文档添加 frontmatter tags")
     if low_links:
         issues.append("为链接不足的文档补充交叉引用（建议 >= 2 条）")
+    if empty_docs:
+        issues.append("补充空文档内容或删除无用占位页")
+    if self_links:
+        issues.append("移除自引用链接（页面不应链接到自身）")
 
     if issues:
         print(f"\n   💡 建议:")
@@ -931,6 +977,8 @@ def cmd_fix(args: argparse.Namespace) -> None:
 
     # Fix 1: Broken links
     for d in docs:
+        if d["category"] == "raw":
+            continue
         text = d.get("_text", "")
         if not text:
             continue
@@ -950,6 +998,8 @@ def cmd_fix(args: argparse.Namespace) -> None:
 
     # Fix 2: Naming inconsistency in wikilinks (underscores, mixed case)
     for d in docs:
+        if d["category"] == "raw":
+            continue
         text = d.get("_text", "")
         if not text:
             continue

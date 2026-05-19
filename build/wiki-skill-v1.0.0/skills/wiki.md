@@ -257,6 +257,8 @@ Run a comprehensive health check on the wiki. Checks for:
 - **Broken links** — `[[wikilinks]]` pointing to non-existent pages
 - **Untagged documents** — missing frontmatter `tags`
 - **Low-link documents** — fewer than 2 outbound `[[wikilinks]]`
+- **Empty documents** — content under 50 bytes (stub/placeholder pages)
+- **Self-referential links** — `[[wikilinks]]` pointing to the document itself
 
 Output includes a health score (0-100) and actionable suggestions.
 

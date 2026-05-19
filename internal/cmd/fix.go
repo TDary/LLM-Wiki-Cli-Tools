@@ -69,6 +69,9 @@ func fixCmd(args []string) {
 	seen := make(map[string]bool)
 
 	for _, d := range docs {
+		if d.Category == "raw" {
+			continue
+		}
 		matches := fixWikilinkRe.FindAllStringSubmatch(d.Text, -1)
 		for _, m := range matches {
 			if len(m) < 2 {
@@ -105,6 +108,9 @@ func fixCmd(args []string) {
 	}
 
 	for _, d := range docs {
+		if d.Category == "raw" {
+			continue
+		}
 		matches := fixWikilinkRe.FindAllStringSubmatch(d.Text, -1)
 		for _, m := range matches {
 			if len(m) < 2 {

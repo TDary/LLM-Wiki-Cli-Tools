@@ -51,6 +51,9 @@ func healthCmd(args []string) {
 
 	var userDocs []wiki.Doc
 	for _, d := range docs {
+		if d.Category == "raw" {
+			continue
+		}
 		stem := strings.ToLower(strings.TrimSuffix(filepath.Base(d.File), ".md"))
 		if !wiki.SystemFiles[stem] {
 			userDocs = append(userDocs, d)
@@ -115,12 +118,47 @@ func healthCmd(args []string) {
 		}
 	}
 
+	var emptyDocs []wiki.Doc
+	for _, d := range userDocs {
+		if len(strings.TrimSpace(d.Text)) < 50 {
+			emptyDocs = append(emptyDocs, d)
+		}
+	}
+
+	type SelfLink struct {
+		File  string `json:"file"`
+		Title string `json:"title"`
+		Line  int    `json:"line"`
+		Link  string `json:"link"`
+	}
+	var selfLinks []SelfLink
+	for _, d := range userDocs {
+		selfStem := strings.ToLower(strings.TrimSuffix(filepath.Base(d.File), ".md"))
+		for lineNo, line := range strings.Split(d.Text, "\n") {
+			matches := healthWikilinkRe.FindAllStringSubmatch(line, -1)
+			for _, m := range matches {
+				if len(m) < 2 {
+					continue
+				}
+				target := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(m[1]), " ", "-"))
+				if target == selfStem {
+					selfLinks = append(selfLinks, SelfLink{
+						File:  d.File,
+						Title: d.Title,
+						Line:  lineNo + 1,
+						Link:  m[1],
+					})
+				}
+			}
+		}
+	}
+
 	total := len(userDocs)
 	if total == 0 {
 		total = 1
 	}
-	deductions := len(orphans)*3 + len(brokenLinks)*5 + len(noTags)*1 + len(lowLinks)*2
-	score := 100 - deductions*100/(total*4)
+	deductions := len(orphans)*3 + len(brokenLinks)*5 + len(noTags)*1 + len(lowLinks)*2 + len(emptyDocs)*2 + len(selfLinks)*1
+	score := 100 - deductions*100/(total*6)
 	if score < 0 {
 		score = 0
 	}
@@ -139,6 +177,8 @@ func healthCmd(args []string) {
 				"broken_links": map[string]interface{}{"count": len(brokenLinks), "items": brokenLinks},
 				"no_tags":      map[string]interface{}{"count": len(noTags), "items": noTags},
 				"low_links":    map[string]interface{}{"count": len(lowLinks), "items": lowLinks},
+				"empty_docs":   map[string]interface{}{"count": len(emptyDocs), "items": emptyDocs},
+				"self_links":   map[string]interface{}{"count": len(selfLinks), "items": selfLinks},
 			},
 		}
 		enc := json.NewEncoder(os.Stdout)
@@ -165,6 +205,8 @@ func healthCmd(args []string) {
 	fmt.Printf("   %s 断链:         %d 处\n", statusIcon(len(brokenLinks), 0), len(brokenLinks))
 	fmt.Printf("   %s 无标签文档:   %d 篇\n", statusIcon(len(noTags), 5), len(noTags))
 	fmt.Printf("   %s 链接不足:     %d 篇 (< 2 条链接)\n", statusIcon(len(lowLinks), 5), len(lowLinks))
+	fmt.Printf("   %s 空文档:       %d 篇 (< 50 字节)\n", statusIcon(len(emptyDocs), 3), len(emptyDocs))
+	fmt.Printf("   %s 自引用:       %d 处\n", statusIcon(len(selfLinks), 0), len(selfLinks))
 	fmt.Printf("\n   健康评分: %d/100\n", score)
 
 	if len(brokenLinks) > 0 {
@@ -195,6 +237,34 @@ func healthCmd(args []string) {
 		}
 	}
 
+	if len(emptyDocs) > 0 {
+		fmt.Printf("\n   ── 空文档 ──\n")
+		limit := 10
+		if len(emptyDocs) < limit {
+			limit = len(emptyDocs)
+		}
+		for _, d := range emptyDocs[:limit] {
+			fmt.Printf("   📄 %s  (%s, %d 字节)\n", d.Title, d.File, len(d.Text))
+		}
+		if len(emptyDocs) > 10 {
+			fmt.Printf("   ... 共 %d 篇空文档\n", len(emptyDocs))
+		}
+	}
+
+	if len(selfLinks) > 0 {
+		fmt.Printf("\n   ── 自引用 ──\n")
+		limit := 10
+		if len(selfLinks) < limit {
+			limit = len(selfLinks)
+		}
+		for _, sl := range selfLinks[:limit] {
+			fmt.Printf("   🔄 %s (L%d): [[%s]] → 自身\n", sl.File, sl.Line, sl.Link)
+		}
+		if len(selfLinks) > 10 {
+			fmt.Printf("   ... 共 %d 处自引用\n", len(selfLinks))
+		}
+	}
+
 	var issues []string
 	if len(brokenLinks) > 0 {
 		issues = append(issues, "修复断链（目标页面不存在）")
@@ -207,6 +277,12 @@ func healthCmd(args []string) {
 	}
 	if len(lowLinks) > 0 {
 		issues = append(issues, "为链接不足的文档补充交叉引用（建议 >= 2 条）")
+	}
+	if len(emptyDocs) > 0 {
+		issues = append(issues, "补充空文档内容或删除无用占位页")
+	}
+	if len(selfLinks) > 0 {
+		issues = append(issues, "移除自引用链接（页面不应链接到自身）")
 	}
 
 	if len(issues) > 0 {

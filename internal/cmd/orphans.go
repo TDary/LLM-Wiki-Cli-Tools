@@ -48,6 +48,9 @@ func orphansCmd(args []string) {
 
 	var orphans []wiki.Doc
 	for _, doc := range docs {
+		if doc.Category == "raw" {
+			continue
+		}
 		stem := strings.ToLower(strings.TrimSuffix(filepath.Base(doc.File), ".md"))
 		if wiki.SystemFiles[stem] {
 			continue
