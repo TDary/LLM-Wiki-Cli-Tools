@@ -1,6 +1,6 @@
 ---
 name: wiki
-version: 1.0.2
+version: 1.0.3
 description: 创建、查询和管理本地知识库，纯文件模式，零依赖
 ---
 
