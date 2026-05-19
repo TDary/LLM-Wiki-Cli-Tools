@@ -62,7 +62,10 @@ This is **pure local mode**. There is no Git, no network, no sync. Files are the
 | `python scripts/wiki.py sync [path]` | Confirm local-only status |
 | `python scripts/wiki.py bootstrap <path>` | Bootstrap wiki at a given path |
 | `python scripts/wiki.py install <project>` | Install skill into a project |
-| `python scripts/wiki.py list [path] [--format json]` | List all documents with metadata |
+| `python scripts/wiki.py list [path] [--format json] [--category CAT] [--tags TAG1,TAG2]` | List all documents with metadata |
+| `python scripts/wiki.py search <keyword> [path] [--format json]` | Full-text search across documents |
+| `python scripts/wiki.py backlinks <page> [path] [--format json]` | Find all pages linking to a target |
+| `python scripts/wiki.py orphans [path] [--format json]` | Detect orphan documents with no inbound links |
 | `python scripts/wiki.py index [path] [--output FILE]` | Generate structured JSON index for frontend |
 
 ## Wiki Structure

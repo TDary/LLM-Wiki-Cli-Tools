@@ -1,10 +1,10 @@
 ---
 name: wiki
-version: 1.0.3
+version: 1.0.5
 description: 创建、查询和管理本地知识库，纯文件模式，零依赖
 ---
 
-# Local Wiki Skill v0.1.0
+# Local Wiki Skill v1.0.5
 
 Zero-dependency local wiki management for Claude Code. Pure Python, pure files — no Git, no network, just Python 3.9+.
 
@@ -37,6 +37,9 @@ local-wiki-skill/
 | `python scripts/wiki.py sync [path]` | Confirm local-only status |
 | `python scripts/wiki.py bootstrap <path>` | Bootstrap at a given path |
 | `python scripts/wiki.py list [path]` | List all documents (table or JSON) |
+| `python scripts/wiki.py search <keyword> [path]` | Full-text search across documents |
+| `python scripts/wiki.py backlinks <page> [path]` | Find all pages linking to a target |
+| `python scripts/wiki.py orphans [path]` | Detect orphan documents with no inbound links |
 | `python scripts/wiki.py index [path]` | Generate JSON index for frontend |
 
 ## Quick Check
@@ -79,7 +82,7 @@ Bootstrap a wiki at an existing or new path. Equivalent to `init` with the given
 ## /wiki list
 
 ```
-/wiki list [path] [--format table|json] [--category CAT] [--pretty]
+/wiki list [path] [--format table|json] [--category CAT] [--tags TAG1,TAG2] [--pretty]
 ```
 
 List all knowledge documents in the wiki. Default: table format grouped by category.
@@ -87,8 +90,49 @@ List all knowledge documents in the wiki. Default: table format grouped by categ
 **Options:**
 - `--format json` — output as JSON (with `--pretty` for indentation)
 - `--category concepts` — filter to a single directory
+- `--tags AI,tech` — filter by tags (comma-separated, matches any)
 
 Output includes: title, file path, category, size, last modified time, tags, wiki-link count.
+
+## /wiki search
+
+```
+/wiki search <keyword> [path] [--format table|json] [--pretty]
+```
+
+Full-text search across all wiki documents. Case-insensitive substring matching on both titles and body content.
+
+**Options:**
+- `--format json` — output as JSON (with `--pretty` for indentation)
+
+Output includes: document title, file path, matching lines with line numbers.
+
+## /wiki backlinks
+
+```
+/wiki backlinks <page> [path] [--format table|json] [--pretty]
+```
+
+Find all documents that link to a given page via `[[wikilinks]]`.
+
+**Options:**
+- `<page>` — target page name (e.g., `transformer-architecture` or `transformer-architecture.md`)
+- `--format json` — output as JSON (with `--pretty` for indentation)
+
+Output includes: source document title, file path, line number, and line content.
+
+## /wiki orphans
+
+```
+/wiki orphans [path] [--format table|json] [--pretty]
+```
+
+Detect orphan documents — files that have no inbound `[[wikilinks]]` from other documents. Excludes system files (`SCHEMA.md`, `README.md`, `log.md`).
+
+**Options:**
+- `--format json` — output as JSON (with `--pretty` for indentation)
+
+Output includes: orphan document list with suggestions for linking them into the wiki graph.
 
 ## /wiki index
 

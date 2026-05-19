@@ -2,6 +2,7 @@
 """wiki-tools — Local wiki management (pure local mode, no Git)."""
 
 import argparse
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +14,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-VERSION = "0.1.0"
+VERSION = "1.0.5"
 
 DIRS = ["raw", "entities", "concepts", "relations", "queries", "drafts"]
 
@@ -39,6 +40,13 @@ def today() -> str:
 
 def expand(s: str) -> Path:
     return Path(s).expanduser().resolve()
+
+
+def require_wiki(path: Path) -> None:
+    """Exit if path is not a valid wiki directory."""
+    if not (path / "SCHEMA.md").exists():
+        print(f"❌ 未找到 SCHEMA.md: {path} 不是一个 wiki 目录")
+        sys.exit(1)
 
 
 # ── templates ──
@@ -139,36 +147,90 @@ def extract_title(filepath: Path) -> str:
 
 def extract_frontmatter(filepath: Path) -> dict:
     """Extract YAML-style frontmatter between --- markers."""
-    fm = {}
     try:
-        content = filepath.read_text(encoding="utf-8")
-        lines = content.splitlines()
-        if lines and lines[0].strip() == "---":
-            for i in range(1, len(lines)):
-                line = lines[i].strip()
-                if line == "---":
-                    break
-                if ":" in line:
-                    key, _, val = line.partition(":")
-                    key = key.strip()
-                    val = val.strip().strip('"').strip("'")
-                    if key == "tags":
-                        fm[key] = [t.strip() for t in val.strip("[]").split(",") if t.strip()]
-                    else:
-                        fm[key] = val
+        return extract_frontmatter_from_text(filepath.read_text(encoding="utf-8"))
     except Exception:
-        pass
+        return {}
+
+
+def extract_frontmatter_from_text(text: str) -> dict:
+    """Extract YAML-style frontmatter from raw text."""
+    fm = {}
+    lines = text.splitlines()
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            line = lines[i].strip()
+            if line == "---":
+                break
+            if ":" in line:
+                key, _, val = line.partition(":")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key == "tags":
+                    fm[key] = [t.strip() for t in val.strip("[]").split(",") if t.strip()]
+                else:
+                    fm[key] = val
     return fm
 
 
-def count_wikilinks(filepath: Path) -> int:
-    """Count [[wikilinks]] in a markdown file."""
-    import re
-    try:
-        text = filepath.read_text(encoding="utf-8")
-        return len(re.findall(r"\[\[.+?\]\]", text))
-    except Exception:
-        return 0
+def build_backlink_map(wiki_path: Path) -> dict[str, list[dict]]:
+    """Build a map of {target_file: [source_doc_info, ...]} from all wikilinks."""
+    backlinks: dict[str, list[dict]] = {}
+    for d in DIRS:
+        category_dir = wiki_path / d
+        if not category_dir.is_dir():
+            continue
+        for md_file in sorted(category_dir.glob("*.md")):
+            try:
+                text = md_file.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            rel_file = str(md_file.relative_to(wiki_path)).replace("\\", "/")
+            fm = extract_frontmatter_from_text(text)
+            title = fm.get("title") or extract_title(md_file)
+            text_lines = text.splitlines()
+            link_targets = [m.group(1) for m in re.finditer(r"\[\[(.+?)\]\]", text)]
+            for target in link_targets:
+                target_stem = target.strip().lower().replace(" ", "-")
+                if target_stem not in backlinks:
+                    backlinks[target_stem] = []
+                link_pattern = f"[[{target}]]"
+                for line_no, line in enumerate(text_lines, 1):
+                    if link_pattern in line:
+                        backlinks[target_stem].append({
+                            "source_title": title,
+                            "source_file": rel_file,
+                            "line": line_no,
+                            "line_content": line.strip(),
+                        })
+    return backlinks
+
+
+def search_documents(docs: list[dict], keyword: str) -> list[dict]:
+    """Search documents by keyword in title and body content (case-insensitive)."""
+    results = []
+    kw_lower = keyword.lower()
+    for doc in docs:
+        matches_in_file = []
+        # Check title
+        if kw_lower in doc["title"].lower():
+            matches_in_file.append({"line": 0, "content": doc["title"]})
+        # Check body from cached text
+        text = doc.get("_text", "")
+        if not text:
+            try:
+                text = Path(doc["absolute_path"]).read_text(encoding="utf-8")
+            except Exception:
+                pass
+        for line_no, line in enumerate(text.splitlines(), 1):
+            if kw_lower in line.lower():
+                matches_in_file.append({"line": line_no, "content": line.strip()})
+        if matches_in_file:
+            out = {k: v for k, v in doc.items() if k != "_text"}
+            out["matches"] = matches_in_file
+            out["match_count"] = len(matches_in_file)
+            results.append(out)
+    return results
 
 
 def collect_documents(wiki_path: Path) -> list[dict]:
@@ -180,7 +242,11 @@ def collect_documents(wiki_path: Path) -> list[dict]:
             continue
         for md_file in sorted(category_dir.glob("*.md")):
             stat = md_file.stat()
-            fm = extract_frontmatter(md_file)
+            try:
+                text = md_file.read_text(encoding="utf-8")
+            except Exception:
+                text = ""
+            fm = extract_frontmatter_from_text(text)
             docs.append({
                 "title": fm.get("title") or extract_title(md_file),
                 "file": str(md_file.relative_to(wiki_path)).replace("\\", "/"),
@@ -190,7 +256,8 @@ def collect_documents(wiki_path: Path) -> list[dict]:
                 "size": stat.st_size,
                 "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
                 "tags": fm.get("tags", []),
-                "links_count": count_wikilinks(md_file),
+                "links_count": len(re.findall(r"\[\[.+?\]\]", text)),
+                "_text": text,
             })
     return docs
 
@@ -264,11 +331,7 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 def cmd_sync(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
-    schema = path / "SCHEMA.md"
-
-    if not schema.exists():
-        print(f"❌ 未找到 SCHEMA.md: {path} 不是一个 wiki 目录")
-        sys.exit(1)
+    require_wiki(path)
 
     print(f"ℹ️  本地模式 — 无需同步，文件即唯一真相来源: {path}")
 
@@ -323,12 +386,14 @@ def cmd_install(args: argparse.Namespace) -> None:
     print("Done. The skill is now active for Claude Code + all AGENTS.md-compatible tools.")
 
 
+def _strip_internal(docs: list[dict]) -> list[dict]:
+    """Remove internal fields (_text) before serialization."""
+    return [{k: v for k, v in d.items() if not k.startswith("_")} for d in docs]
+
+
 def cmd_list(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
-    schema = path / "SCHEMA.md"
-    if not schema.exists():
-        print(f"❌ 未找到 SCHEMA.md: {path} 不是一个 wiki 目录")
-        sys.exit(1)
+    require_wiki(path)
 
     docs = collect_documents(path)
 
@@ -336,13 +401,18 @@ def cmd_list(args: argparse.Namespace) -> None:
     if hasattr(args, "category") and args.category:
         docs = [d for d in docs if d["category"] == args.category]
 
+    # Filter by tags
+    if hasattr(args, "tags") and args.tags:
+        filter_tags = {t.strip().lower() for t in args.tags.split(",") if t.strip()}
+        docs = [d for d in docs if filter_tags & {t.lower() for t in d.get("tags", [])}]
+
     if args.format == "json":
         import json
         meta = read_schema_meta(path)
         output = {
             "wiki": meta,
             "total": len(docs),
-            "documents": docs,
+            "documents": _strip_internal(docs),
         }
         print(json.dumps(output, ensure_ascii=False, indent=2 if getattr(args, "pretty", False) else None))
         return
@@ -366,10 +436,7 @@ def cmd_list(args: argparse.Namespace) -> None:
 
 def cmd_index(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
-    schema = path / "SCHEMA.md"
-    if not schema.exists():
-        print(f"❌ 未找到 SCHEMA.md: {path} 不是一个 wiki 目录")
-        sys.exit(1)
+    require_wiki(path)
 
     import json
 
@@ -388,7 +455,7 @@ def cmd_index(args: argparse.Namespace) -> None:
                 "documents": [],
             }
         by_category[cat]["count"] += 1
-        by_category[cat]["documents"].append(d)
+        by_category[cat]["documents"].append({k: v for k, v in d.items() if not k.startswith("_")})
 
     # Collect all tags
     all_tags = set()
@@ -414,6 +481,130 @@ def cmd_index(args: argparse.Namespace) -> None:
     print(f"   文档总数: {len(docs)}")
     print(f"   分类数: {len(by_category)}")
     print(f"   标签: {', '.join(sorted(all_tags)) if all_tags else '无'}")
+
+
+def cmd_search(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    docs = collect_documents(path)
+    results = search_documents(docs, args.keyword)
+
+    if args.format == "json":
+        import json
+        meta = read_schema_meta(path)
+        output = {
+            "wiki": meta,
+            "keyword": args.keyword,
+            "total": len(results),
+            "results": results,
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    # Table format
+    print(f"\n🔍 搜索: \"{args.keyword}\"")
+    print(f"   匹配文档: {len(results)} 篇\n")
+    for r in results:
+        print(f"  📄 {r['title']}")
+        print(f"     {r['file']}  ({r['category']})")
+        for m in r["matches"][:5]:
+            prefix = f"L{m['line']}" if m["line"] > 0 else "标题"
+            content = m["content"]
+            if len(content) > 80:
+                content = content[:77] + "..."
+            print(f"     {prefix}: {content}")
+        if len(r["matches"]) > 5:
+            print(f"     ... 共 {r['match_count']} 处匹配")
+        print()
+
+
+def cmd_backlinks(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    # Resolve the target page stem
+    page = args.page
+    # Strip .md extension if provided
+    if page.endswith(".md"):
+        page = page[:-3]
+    target_stem = page.strip().lower().replace(" ", "-")
+
+    backlinks = build_backlink_map(path)
+    refs = backlinks.get(target_stem, [])
+
+    if args.format == "json":
+        import json
+        meta = read_schema_meta(path)
+        output = {
+            "wiki": meta,
+            "page": args.page,
+            "total": len(refs),
+            "backlinks": refs,
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    # Table format
+    print(f"\n🔗 反向链接: [[{page}]]")
+    print(f"   被引用次数: {len(refs)}\n")
+    if not refs:
+        print("   没有找到引用此页面的文档。")
+    else:
+        for ref in refs:
+            print(f"  📄 {ref['source_title']}")
+            print(f"     {ref['source_file']}  (L{ref['line']})")
+            content = ref["line_content"]
+            if len(content) > 80:
+                content = content[:77] + "..."
+            print(f"     {content}")
+            print()
+
+
+def cmd_orphans(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    docs = collect_documents(path)
+    backlinks = build_backlink_map(path)
+
+    # System files to exclude
+    system_files = {"readme.md", "log.md", "schema.md"}
+    orphans = []
+    for doc in docs:
+        stem = Path(doc["file"]).stem.lower()
+        if stem in system_files:
+            continue
+        if stem not in backlinks or len(backlinks[stem]) == 0:
+            orphans.append(doc)
+
+    if args.format == "json":
+        import json
+        meta = read_schema_meta(path)
+        output = {
+            "wiki": meta,
+            "total": len(orphans),
+            "orphans": _strip_internal(orphans),
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    # Table format
+    print(f"\n🏝️  孤立文档检测")
+    print(f"   文档总数: {len(docs)}")
+    print(f"   孤立文档: {len(orphans)}\n")
+    if not orphans:
+        print("   ✅ 没有发现孤立文档，所有文档都有入站链接。")
+    else:
+        for d in orphans:
+            print(f"  📄 {d['title']}")
+            print(f"     {d['file']}  ({d['category']})")
+            if d["links_count"] > 0:
+                print(f"     出站链接: {d['links_count']} 个（但无文档链接到此页面）")
+            else:
+                print(f"     ⚠️  无出站链接且无入站链接")
+        print()
+        print("💡 建议: 在相关文档中添加 [[wikilinks]] 指向孤立文档，或将它们合并到其他页面。")
 
 
 # ── CLI ──
@@ -446,12 +637,30 @@ def main() -> None:
     p_list.add_argument("path", nargs="?", default=".")
     p_list.add_argument("--format", default="table", choices=["table", "json"])
     p_list.add_argument("--category", default="", help="过滤指定目录 (raw/entities/concepts/relations/queries/drafts)")
+    p_list.add_argument("--tags", default="", help="按标签过滤 (逗号分隔, 如 AI,tech)")
     p_list.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
 
     p_index = sub.add_parser("index", help="生成结构化 JSON 索引")
     p_index.add_argument("path", nargs="?", default=".")
     p_index.add_argument("--output", default="", help="输出路径 (默认 queries/index.json)")
     p_index.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
+
+    p_search = sub.add_parser("search", help="全文搜索文档")
+    p_search.add_argument("keyword", help="搜索关键词")
+    p_search.add_argument("path", nargs="?", default=".")
+    p_search.add_argument("--format", default="table", choices=["table", "json"])
+    p_search.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
+
+    p_backlinks = sub.add_parser("backlinks", help="查看页面的反向链接")
+    p_backlinks.add_argument("page", help="目标页面名 (如 transformer-architecture)")
+    p_backlinks.add_argument("path", nargs="?", default=".")
+    p_backlinks.add_argument("--format", default="table", choices=["table", "json"])
+    p_backlinks.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
+
+    p_orphans = sub.add_parser("orphans", help="检测孤立文档")
+    p_orphans.add_argument("path", nargs="?", default=".")
+    p_orphans.add_argument("--format", default="table", choices=["table", "json"])
+    p_orphans.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
 
     args = parser.parse_args()
     if args.command is None:
@@ -470,6 +679,12 @@ def main() -> None:
         cmd_list(args)
     elif args.command == "index":
         cmd_index(args)
+    elif args.command == "search":
+        cmd_search(args)
+    elif args.command == "backlinks":
+        cmd_backlinks(args)
+    elif args.command == "orphans":
+        cmd_orphans(args)
 
 
 if __name__ == "__main__":
