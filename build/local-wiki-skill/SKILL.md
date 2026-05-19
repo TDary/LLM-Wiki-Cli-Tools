@@ -40,6 +40,9 @@ local-wiki-skill/
 | `python scripts/wiki.py search <keyword> [path]` | Full-text search across documents |
 | `python scripts/wiki.py backlinks <page> [path]` | Find all pages linking to a target |
 | `python scripts/wiki.py orphans [path]` | Detect orphan documents with no inbound links |
+| `python scripts/wiki.py health [path]` | Run full health check on wiki |
+| `python scripts/wiki.py trace <page> [path]` | Trace upstream/downstream dependency chain |
+| `python scripts/wiki.py fix [path]` | Auto-fix broken links and normalize naming |
 | `python scripts/wiki.py index [path]` | Generate JSON index for frontend |
 
 ## Quick Check
@@ -135,6 +138,52 @@ Detect orphan documents — files that have no inbound `[[wikilinks]]` from othe
 - `--format json` — output as JSON (with `--pretty` for indentation)
 
 Output includes: orphan document list with suggestions for linking them into the wiki graph.
+
+## /wiki health
+
+```
+/wiki health [path] [--format table|json] [--pretty]
+```
+
+Run a comprehensive health check on the wiki. Checks for:
+
+- **Orphan documents** — no inbound `[[wikilinks]]`
+- **Broken links** — `[[wikilinks]]` pointing to non-existent pages
+- **Untagged documents** — missing frontmatter `tags`
+- **Low-link documents** — fewer than 2 outbound `[[wikilinks]]`
+
+Output includes a health score (0-100) and actionable suggestions.
+
+## /wiki fix
+
+```
+/wiki fix [path] [--apply] [--format table|json] [--pretty]
+```
+
+Structural self-healing: detect and auto-fix broken wikilinks and naming inconsistencies.
+
+**Checks:**
+- **Broken links** — `[[wikilink]]` pointing to non-existent pages, auto-suggest closest match
+- **Naming normalization** — underscores → hyphens in wikilinks (e.g., `[[unity_ugui]]` → `[[unity-ugui]]`)
+
+**Options:**
+- `--apply` — actually apply fixes (default is dry-run preview)
+- `--format json` — output as JSON (with `--pretty` for indentation)
+
+Default mode is dry-run: shows what would be fixed without making changes.
+
+## /wiki trace
+
+```
+/wiki trace <page> [path] [--format table|json] [--pretty]
+```
+
+Trace the full upstream and downstream dependency chain of a document via `[[wikilinks]]`.
+
+- **Upstream** — what this page references (directly and transitively)
+- **Downstream** — what pages reference this page (directly and transitively)
+
+Supports detecting circular references (visited nodes are skipped). Max depth: 10 levels.
 
 ## /wiki index
 

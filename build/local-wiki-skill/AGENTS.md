@@ -66,6 +66,9 @@ This is **pure local mode**. There is no Git, no network, no sync. Files are the
 | `python scripts/wiki.py search <keyword> [path] [--format json] [--no-raw]` | Full-text search across documents |
 | `python scripts/wiki.py backlinks <page> [path] [--format json]` | Find all pages linking to a target |
 | `python scripts/wiki.py orphans [path] [--format json]` | Detect orphan documents with no inbound links |
+| `python scripts/wiki.py health [path] [--format json]` | Full health check (orphans, broken links, tags, links) |
+| `python scripts/wiki.py trace <page> [path] [--format json]` | Trace upstream/downstream dependency chain |
+| `python scripts/wiki.py fix [path] [--apply] [--format json]` | Auto-fix broken links and normalize naming (dry-run by default) |
 | `python scripts/wiki.py index [path] [--output FILE]` | Generate structured JSON index for frontend |
 
 ## Wiki Structure

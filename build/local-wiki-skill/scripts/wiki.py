@@ -616,6 +616,431 @@ def cmd_orphans(args: argparse.Namespace) -> None:
         print("💡 建议: 在相关文档中添加 [[wikilinks]] 指向孤立文档，或将它们合并到其他页面。")
 
 
+def cmd_health(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    docs = collect_documents(path)
+    backlinks = build_backlink_map(path)
+
+    # Exclude system files
+    system_files = {"readme.md", "log.md", "schema.md"}
+    user_docs = [d for d in docs if Path(d["file"]).stem.lower() not in system_files]
+
+    # Build set of all existing page stems for broken link detection
+    existing_stems = {Path(d["file"]).stem.lower() for d in docs}
+
+    # Check 1: Orphan documents (no inbound links)
+    orphans = []
+    for d in user_docs:
+        stem = Path(d["file"]).stem.lower()
+        if stem not in backlinks or len(backlinks[stem]) == 0:
+            orphans.append(d)
+
+    # Check 2: Broken wikilinks (outbound links to non-existent pages)
+    broken_links = []
+    for d in user_docs:
+        text = d.get("_text", "")
+        if not text:
+            try:
+                text = Path(d["absolute_path"]).read_text(encoding="utf-8")
+            except Exception:
+                continue
+        for m in re.finditer(r"\[\[(.+?)\]\]", text):
+            target = m.group(1).strip().lower().replace(" ", "-")
+            if target not in existing_stems:
+                # Find line number
+                for line_no, line in enumerate(text.splitlines(), 1):
+                    if f"[[{m.group(1)}]]" in line:
+                        broken_links.append({
+                            "source_file": d["file"],
+                            "source_title": d["title"],
+                            "target": m.group(1),
+                            "line": line_no,
+                        })
+                        break
+
+    # Check 3: Documents without tags
+    no_tags = [d for d in user_docs if not d.get("tags")]
+
+    # Check 4: Documents with < 2 outbound links
+    low_links = [d for d in user_docs if d["links_count"] < 2]
+
+    # Calculate health score (100 = perfect)
+    total_checks = len(user_docs) if user_docs else 1
+    deductions = 0
+    deductions += len(orphans) * 3          # -3 per orphan
+    deductions += len(broken_links) * 5     # -5 per broken link (most severe)
+    deductions += len(no_tags) * 1          # -1 per untagged doc
+    deductions += len(low_links) * 2        # -2 per low-link doc
+    score = max(0, min(100, 100 - int(deductions * 100 / (total_checks * 4))))
+
+    # Status icon
+    def status_icon(count: int, threshold: int = 0) -> str:
+        if count == 0:
+            return "✅"
+        elif count <= threshold:
+            return "⚠️"
+        else:
+            return "❌"
+
+    if args.format == "json":
+        import json
+        meta = read_schema_meta(path)
+        output = {
+            "wiki": meta,
+            "score": score,
+            "total_documents": len(user_docs),
+            "checks": {
+                "orphans": {"count": len(orphans), "items": orphans},
+                "broken_links": {"count": len(broken_links), "items": broken_links},
+                "no_tags": {"count": len(no_tags), "items": _strip_internal(no_tags)},
+                "low_links": {"count": len(low_links), "items": _strip_internal(low_links)},
+            },
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    # Table format
+    meta = read_schema_meta(path)
+    print(f"\n🏥 {meta['name']} — 知识库健康报告")
+    print(f"   文档总数: {len(user_docs)}\n")
+
+    print(f"   {status_icon(len(orphans), 5)} 孤立文档:     {len(orphans)} 篇")
+    print(f"   {status_icon(len(broken_links))} 断链:         {len(broken_links)} 处")
+    print(f"   {status_icon(len(no_tags), 5)} 无标签文档:   {len(no_tags)} 篇")
+    print(f"   {status_icon(len(low_links), 5)} 链接不足:     {len(low_links)} 篇 (< 2 条链接)")
+    print()
+    print(f"   健康评分: {score}/100")
+
+    # Show details for issues
+    if broken_links:
+        print(f"\n   ── 断链详情 ──")
+        for bl in broken_links[:10]:
+            print(f"   ❌ {bl['source_file']} (L{bl['line']}): [[{bl['target']}]] → 不存在")
+        if len(broken_links) > 10:
+            print(f"   ... 共 {len(broken_links)} 处断链")
+
+    if orphans:
+        print(f"\n   ── 孤立文档 ──")
+        for d in orphans[:10]:
+            print(f"   📄 {d['title']}  ({d['file']})")
+        if len(orphans) > 10:
+            print(f"   ... 共 {len(orphans)} 篇孤立文档")
+
+    # Suggestions
+    issues = []
+    if broken_links:
+        issues.append("修复断链（目标页面不存在）")
+    if orphans:
+        issues.append("为孤立文档添加 [[wikilinks]]")
+    if no_tags:
+        issues.append("给无标签文档添加 frontmatter tags")
+    if low_links:
+        issues.append("为链接不足的文档补充交叉引用（建议 >= 2 条）")
+
+    if issues:
+        print(f"\n   💡 建议:")
+        for i, issue in enumerate(issues, 1):
+            print(f"      {i}. {issue}")
+    else:
+        print(f"\n   🎉 知识库状态良好，没有发现明显问题。")
+
+
+def _build_link_graph(wiki_path: Path) -> tuple[dict[str, list[str]], dict[str, dict]]:
+    """Build bidirectional link graph. Returns (outbound_map, doc_info_map)."""
+    outbound: dict[str, list[str]] = {}   # stem -> [target_stems]
+    doc_info: dict[str, dict] = {}         # stem -> {title, file, category}
+
+    for d in DIRS:
+        category_dir = wiki_path / d
+        if not category_dir.is_dir():
+            continue
+        for md_file in sorted(category_dir.glob("*.md")):
+            try:
+                text = md_file.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            stem = md_file.stem.lower()
+            fm = extract_frontmatter_from_text(text)
+            title = fm.get("title") or extract_title(md_file)
+            rel_file = str(md_file.relative_to(wiki_path)).replace("\\", "/")
+            doc_info[stem] = {"title": title, "file": rel_file, "category": d}
+
+            targets = []
+            for m in re.finditer(r"\[\[(.+?)\]\]", text):
+                target_stem = m.group(1).strip().lower().replace(" ", "-")
+                targets.append(target_stem)
+            outbound[stem] = targets
+
+    return outbound, doc_info
+
+
+def _trace_downstream(stem: str, inbound: dict[str, list[str]], visited: set, depth: int) -> list[dict]:
+    """Recursively trace downstream (who links to this page)."""
+    results = []
+    if depth > 10 or stem in visited:
+        return results
+    visited.add(stem)
+    for source_stem in inbound.get(stem, []):
+        results.append({"stem": source_stem, "depth": depth})
+        results.extend(_trace_downstream(source_stem, inbound, visited, depth + 1))
+    return results
+
+
+def _trace_upstream(stem: str, outbound: dict[str, list[str]], visited: set, depth: int) -> list[dict]:
+    """Recursively trace upstream (what this page links to)."""
+    results = []
+    if depth > 10 or stem in visited:
+        return results
+    visited.add(stem)
+    for target_stem in outbound.get(stem, []):
+        results.append({"stem": target_stem, "depth": depth})
+        results.extend(_trace_upstream(target_stem, outbound, visited, depth + 1))
+    return results
+
+
+def cmd_trace(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    # Resolve target stem
+    page = args.page
+    if page.endswith(".md"):
+        page = page[:-3]
+    target_stem = page.strip().lower().replace(" ", "-")
+
+    outbound, doc_info = _build_link_graph(path)
+
+    # Build inbound map from outbound
+    inbound: dict[str, list[str]] = {}
+    for source, targets in outbound.items():
+        for t in targets:
+            if t not in inbound:
+                inbound[t] = []
+            inbound[t].append(source)
+
+    doc = doc_info.get(target_stem)
+    if not doc:
+        print(f"❌ 未找到页面: {page}")
+        sys.exit(1)
+
+    # Trace upstream (what this page links to)
+    upstream = _trace_upstream(target_stem, outbound, set(), 1)
+    # Trace downstream (what links to this page)
+    downstream = _trace_downstream(target_stem, inbound, set(), 1)
+
+    if args.format == "json":
+        import json
+        meta = read_schema_meta(path)
+
+        def _enrich(items):
+            enriched = []
+            for item in items:
+                info = doc_info.get(item["stem"], {"title": item["stem"], "file": "???", "category": "???"})
+                enriched.append({**item, **info})
+            return enriched
+
+        output = {
+            "wiki": meta,
+            "page": page,
+            "document": doc,
+            "upstream": _enrich(upstream),
+            "downstream": _enrich(downstream),
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    # Table format
+    print(f"\n🔍 溯源: [[{page}]]")
+    print(f"   {doc['title']}  ({doc['file']})")
+
+    # Upstream
+    print(f"\n   ── 上游（该页面引用了）──")
+    if not upstream:
+        print("   无上游引用。")
+    else:
+        seen = set()
+        for item in upstream:
+            if item["stem"] in seen:
+                continue
+            seen.add(item["stem"])
+            info = doc_info.get(item["stem"])
+            if info:
+                indent = "   " + "  " * item["depth"]
+                marker = "←" if item["depth"] == 1 else "←" + "─" * item["depth"]
+                print(f" {indent}{marker} [[{info['title']}]]  ({info['file']})")
+            else:
+                indent = "   " + "  " * item["depth"]
+                print(f" {indent}← [[{item['stem']}]]  (⚠️ 不存在)")
+
+    # Downstream
+    print(f"\n   ── 下游（哪些页面引用了该页面）──")
+    if not downstream:
+        print("   无下游引用。")
+    else:
+        seen = set()
+        for item in downstream:
+            if item["stem"] in seen:
+                continue
+            seen.add(item["stem"])
+            info = doc_info.get(item["stem"])
+            if info:
+                indent = "   " + "  " * item["depth"]
+                marker = "→" if item["depth"] == 1 else "→" + "─" * item["depth"]
+                print(f" {indent}{marker} [[{info['title']}]]  ({info['file']})")
+
+    # Summary
+    print(f"\n   上游引用: {len(set(i['stem'] for i in upstream))} 个")
+    print(f"   下游被引: {len(set(i['stem'] for i in downstream))} 个")
+
+
+def _find_closest(target: str, candidates: list[str]) -> str | None:
+    """Find the closest matching stem using edit distance."""
+    best = None
+    best_score = -1
+    target_chars = set(target)
+    for c in candidates:
+        # Simple overlap score: ratio of shared characters
+        c_chars = set(c)
+        overlap = len(target_chars & c_chars) / max(len(target_chars | c_chars), 1)
+        # Bonus for prefix match
+        prefix = 0
+        for a, b in zip(target, c):
+            if a == b:
+                prefix += 1
+            else:
+                break
+        score = overlap + prefix * 0.1
+        if score > best_score:
+            best_score = score
+            best = c
+    return best if best_score > 0.3 else None
+
+
+def cmd_fix(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    docs = collect_documents(path)
+    outbound, doc_info = _build_link_graph(path)
+    existing_stems = set(doc_info.keys())
+
+    # Collect all fixes
+    fixes = []
+
+    # Fix 1: Broken links
+    for d in docs:
+        text = d.get("_text", "")
+        if not text:
+            continue
+        for m in re.finditer(r"\[\[(.+?)\]\]", text):
+            original = m.group(1)
+            target_stem = original.strip().lower().replace(" ", "-")
+            if target_stem not in existing_stems:
+                closest = _find_closest(target_stem, list(existing_stems))
+                fixes.append({
+                    "type": "broken_link",
+                    "file": d["file"],
+                    "original": original,
+                    "target_stem": target_stem,
+                    "suggestion": closest,
+                    "action": f"[[{original}]] → [[{doc_info[closest]['title']}]]" if closest else f"[[{original}]] → (删除或创建目标页面)",
+                })
+
+    # Fix 2: Naming inconsistency in wikilinks (underscores, mixed case)
+    for d in docs:
+        text = d.get("_text", "")
+        if not text:
+            continue
+        for m in re.finditer(r"\[\[(.+?)\]\]", text):
+            original = m.group(1)
+            # Check for underscores
+            if "_" in original:
+                normalized = original.replace("_", "-")
+                fixes.append({
+                    "type": "normalize",
+                    "file": d["file"],
+                    "original": original,
+                    "target_stem": normalized.strip().lower().replace(" ", "-"),
+                    "suggestion": normalized,
+                    "action": f"[[{original}]] → [[{normalized}]]",
+                })
+
+    # Deduplicate
+    seen = set()
+    unique_fixes = []
+    for f in fixes:
+        key = (f["type"], f["file"], f["original"])
+        if key not in seen:
+            seen.add(key)
+            unique_fixes.append(f)
+    fixes = unique_fixes
+
+    if args.format == "json":
+        import json
+        meta = read_schema_meta(path)
+        output = {
+            "wiki": meta,
+            "total": len(fixes),
+            "dry_run": not args.apply,
+            "fixes": fixes,
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    # Table format
+    mode = "预览" if not args.apply else "执行"
+    print(f"\n🔧 自愈检查 — {mode}模式")
+    print(f"   发现 {len(fixes)} 个可修复项\n")
+
+    if not fixes:
+        print("   ✅ 没有发现可自动修复的结构问题。")
+        return
+
+    # Group by type
+    broken = [f for f in fixes if f["type"] == "broken_link"]
+    norm = [f for f in fixes if f["type"] == "normalize"]
+
+    if broken:
+        print(f"   ── 断链修复 ({len(broken)} 处) ──")
+        for f in broken:
+            if args.apply:
+                # Apply fix: replace in file
+                filepath = path / f["file"]
+                text = filepath.read_text(encoding="utf-8")
+                if f["suggestion"]:
+                    info = doc_info[f["suggestion"]]
+                    new_text = text.replace(f"[[{f['original']}]]", f"[[{info['title']}]]")
+                    filepath.write_text(new_text, encoding="utf-8")
+                    print(f"   ✅ {f['file']}: {f['action']}")
+                else:
+                    print(f"   ⏭️  {f['file']}: {f['action']} (需手动处理)")
+            else:
+                status = "✅ 可修复" if f["suggestion"] else "⚠️  需手动"
+                print(f"   {status}  {f['file']}: {f['action']}")
+        print()
+
+    if norm:
+        print(f"   ── 命名规范化 ({len(norm)} 处) ──")
+        for f in norm:
+            if args.apply:
+                filepath = path / f["file"]
+                text = filepath.read_text(encoding="utf-8")
+                new_text = text.replace(f"[[{f['original']}]]", f"[[{f['suggestion']}]]")
+                filepath.write_text(new_text, encoding="utf-8")
+                print(f"   ✅ {f['file']}: {f['action']}")
+            else:
+                print(f"   ✅ 可修复  {f['file']}: {f['action']}")
+        print()
+
+    if not args.apply:
+        auto_count = len([f for f in fixes if f["suggestion"]])
+        manual_count = len(fixes) - auto_count
+        print(f"   💡 {auto_count} 项可自动修复，{manual_count} 项需手动处理。")
+        print(f"      使用 --apply 执行自动修复。")
+
+
 # ── CLI ──
 
 def main() -> None:
@@ -673,6 +1098,23 @@ def main() -> None:
     p_orphans.add_argument("--format", default="table", choices=["table", "json"])
     p_orphans.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
 
+    p_health = sub.add_parser("health", help="知识库健康检查")
+    p_health.add_argument("path", nargs="?", default=".")
+    p_health.add_argument("--format", default="table", choices=["table", "json"])
+    p_health.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
+
+    p_trace = sub.add_parser("trace", help="溯源追踪文档上下游引用链")
+    p_trace.add_argument("page", help="目标页面名 (如 transformer-architecture)")
+    p_trace.add_argument("path", nargs="?", default=".")
+    p_trace.add_argument("--format", default="table", choices=["table", "json"])
+    p_trace.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
+
+    p_fix = sub.add_parser("fix", help="结构层自愈检查与修复")
+    p_fix.add_argument("path", nargs="?", default=".")
+    p_fix.add_argument("--apply", action="store_true", help="执行修复（默认仅预览）")
+    p_fix.add_argument("--format", default="table", choices=["table", "json"])
+    p_fix.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -696,6 +1138,12 @@ def main() -> None:
         cmd_backlinks(args)
     elif args.command == "orphans":
         cmd_orphans(args)
+    elif args.command == "health":
+        cmd_health(args)
+    elif args.command == "trace":
+        cmd_trace(args)
+    elif args.command == "fix":
+        cmd_fix(args)
 
 
 if __name__ == "__main__":
