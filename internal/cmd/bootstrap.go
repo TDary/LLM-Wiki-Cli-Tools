@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"bufio"
@@ -12,6 +12,12 @@ import (
 	"wiki-tools/internal/wiki"
 )
 
+// BootstrapGitFn and DryRunGitFn are set by bootstrap_git.go (build tag !localonly).
+var BootstrapGitFn func(bootstrapConfig)
+var DryRunGitFn func(bootstrapConfig)
+
+func init() { Register("bootstrap", bootstrapCmd) }
+
 type bootstrapConfig struct {
 	remoteURL, localPath          string
 	name, domain                  string
@@ -21,11 +27,6 @@ type bootstrapConfig struct {
 	token, projectName            string
 	local                         bool
 }
-
-var bootstrapGitFn func(bootstrapConfig)
-var dryRunGitFn func(bootstrapConfig)
-
-func init() { commands["bootstrap"] = bootstrapCmd }
 
 func argErr(msg string) {
 	fmt.Fprintf(os.Stderr, "❌ %s\n", msg)
@@ -76,7 +77,6 @@ func parseBootstrapArgs(args []string) bootstrapConfig {
 		case "--local":
 			cfg.local = true
 		case "--dry-run", "-h", "--help", "--version":
-			// handled before this function
 		default:
 			if !strings.HasPrefix(a, "-") {
 				if cfg.remoteURL == "" {
@@ -93,8 +93,6 @@ func parseBootstrapArgs(args []string) bootstrapConfig {
 		i++
 	}
 
-	// Auto-detect: if remoteURL doesn't look like a Git URL,
-	// treat it as a local path (local mode).
 	if cfg.remoteURL != "" && !isGitURL(cfg.remoteURL) && cfg.localPath == "" {
 		cfg.localPath = cfg.remoteURL
 		cfg.remoteURL = ""
@@ -170,8 +168,8 @@ func dryRunBootstrap(args []string) {
 		return
 	}
 
-	if dryRunGitFn != nil {
-		dryRunGitFn(cfg)
+	if DryRunGitFn != nil {
+		DryRunGitFn(cfg)
 	}
 }
 
@@ -182,7 +180,7 @@ func bootstrapCmd(args []string) {
 			printBootstrapHelp()
 			os.Exit(0)
 		case "--version":
-			fmt.Println("wiki-tools v" + version)
+			fmt.Println("wiki-tools v" + Version)
 			os.Exit(0)
 		case "--dry-run":
 			dryRunBootstrap(args)
@@ -239,11 +237,11 @@ func bootstrapCmd(args []string) {
 		return
 	}
 
-	if bootstrapGitFn == nil {
+	if BootstrapGitFn == nil {
 		fmt.Fprintln(os.Stderr, "❌ Git support not compiled in; recompile without -tags localonly")
 		os.Exit(1)
 	}
-	bootstrapGitFn(cfg)
+	BootstrapGitFn(cfg)
 }
 
 func isGitURL(s string) bool {

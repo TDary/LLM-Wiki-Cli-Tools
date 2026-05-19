@@ -1,6 +1,6 @@
 //go:build !localonly
 
-package main
+package cmd
 
 import (
 	"errors"
@@ -12,7 +12,7 @@ import (
 	"wiki-tools/internal/git"
 )
 
-func init() { commands["sync"] = syncCmd }
+func init() { Register("sync", syncCmd) }
 
 type syncParams struct {
 	repoPath                      string
@@ -28,7 +28,7 @@ func syncCmd(args []string) {
 			printSyncHelp()
 			os.Exit(0)
 		case "--version":
-			fmt.Println("wiki-tools v" + version)
+			fmt.Println("wiki-tools v" + Version)
 			os.Exit(0)
 		}
 	}
@@ -50,15 +50,15 @@ func syncCmd(args []string) {
 	}
 
 	var err error
-	if repoPath, err = absPath(repoPath); err != nil {
+	if repoPath, err = AbsPath(repoPath); err != nil {
 		fmt.Fprintf(os.Stderr, "git-auto-sync: path error: %s\n", repoPath)
 		os.Exit(3)
 	}
 
-	committerName := firstNonEmpty(*name, os.Getenv("GIT_SYNC_NAME"), "AI Assistant")
-	committerEmail := firstNonEmpty(*email, os.Getenv("GIT_SYNC_EMAIL"), "ai@local")
-	targetBranch := firstNonEmpty(*branch, os.Getenv("GIT_SYNC_BRANCH"), "")
-	commitMsg := firstNonEmpty(*message, os.Getenv("GIT_SYNC_MESSAGE"), "")
+	committerName := FirstNonEmpty(*name, os.Getenv("GIT_SYNC_NAME"), "AI Assistant")
+	committerEmail := FirstNonEmpty(*email, os.Getenv("GIT_SYNC_EMAIL"), "ai@local")
+	targetBranch := FirstNonEmpty(*branch, os.Getenv("GIT_SYNC_BRANCH"), "")
+	commitMsg := FirstNonEmpty(*message, os.Getenv("GIT_SYNC_MESSAGE"), "")
 	isDryRun := *dryRun || os.Getenv("GIT_SYNC_DRY_RUN") == "1"
 	isForcePush := *forcePush || os.Getenv("GIT_SYNC_FORCE_PUSH") == "1"
 	doRebase := *rebase
@@ -204,7 +204,7 @@ func printSyncHelp() {
 }
 
 func buildCommitMsg(template string) string {
-	ts := timestamp()
+	ts := Timestamp()
 	if template == "" {
 		return "auto sync: " + ts
 	}

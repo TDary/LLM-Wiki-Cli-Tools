@@ -199,12 +199,111 @@ One-command setup from a remote Git repository.
 
 If repository doesn't exist (404), offer to init a new local wiki at that path instead.
 
+## /wiki list
+
+```
+/wiki list [path] [--format table|json] [--category CAT] [--tags TAG1,TAG2] [--include-raw] [--pretty]
+```
+
+List all knowledge documents in the wiki. Default: table format grouped by category. **`raw/` is excluded by default** (immutable source material).
+
+**Options:**
+- `--format json` — output as JSON (with `--pretty` for indentation)
+- `--category concepts` — filter to a single directory
+- `--tags AI,tech` — filter by tags (comma-separated, matches any)
+- `--include-raw` — include `raw/` directory (excluded by default)
+
+## /wiki search
+
+```
+/wiki search <keyword> [path] [--format table|json] [--no-raw] [--pretty]
+```
+
+Full-text search across all wiki documents. Case-insensitive substring matching on both titles and body content.
+
+**Options:**
+- `--format json` — output as JSON (with `--pretty` for indentation)
+- `--no-raw` — exclude `raw/` directory from search results
+
+## /wiki backlinks
+
+```
+/wiki backlinks <page> [path] [--format table|json] [--pretty]
+```
+
+Find all documents that link to a given page via `[[wikilinks]]`.
+
+**Options:**
+- `<page>` — target page name (e.g., `transformer-architecture` or `transformer-architecture.md`)
+- `--format json` — output as JSON (with `--pretty` for indentation)
+
+## /wiki orphans
+
+```
+/wiki orphans [path] [--format table|json] [--pretty]
+```
+
+Detect orphan documents — files that have no inbound `[[wikilinks]]` from other documents. Excludes system files (`SCHEMA.md`, `README.md`, `log.md`).
+
+## /wiki health
+
+```
+/wiki health [path] [--format table|json] [--pretty]
+```
+
+Run a comprehensive health check on the wiki. Checks for:
+
+- **Orphan documents** — no inbound `[[wikilinks]]`
+- **Broken links** — `[[wikilinks]]` pointing to non-existent pages
+- **Untagged documents** — missing frontmatter `tags`
+- **Low-link documents** — fewer than 2 outbound `[[wikilinks]]`
+
+Output includes a health score (0-100) and actionable suggestions.
+
+## /wiki trace
+
+```
+/wiki trace <page> [path] [--format table|json] [--pretty]
+```
+
+Trace the full upstream and downstream dependency chain of a document via `[[wikilinks]]`.
+
+- **Upstream** — what this page references (directly and transitively)
+- **Downstream** — what pages reference this page (directly and transitively)
+
+Supports detecting circular references (visited nodes are skipped). Max depth: 10 levels.
+
+## /wiki fix
+
+```
+/wiki fix [path] [--apply] [--format table|json] [--pretty]
+```
+
+Structural self-healing: detect and auto-fix broken wikilinks and naming inconsistencies.
+
+**Checks:**
+- **Broken links** — `[[wikilink]]` pointing to non-existent pages, auto-suggest closest match
+- **Naming normalization** — underscores → hyphens in wikilinks (e.g., `[[unity_ugui]]` → `[[unity-ugui]]`)
+
+**Options:**
+- `--apply` — actually apply fixes (default is dry-run preview)
+
+Default mode is dry-run: shows what would be fixed without making changes.
+
+## /wiki index
+
+```
+/wiki index [path] [--output index.json] [--pretty]
+```
+
+Generate a structured JSON index for frontend consumption. Default output: `queries/index.json`.
+
 ## Conventions (apply when reading/writing wiki pages)
 
 1. **File names**: lowercase, hyphens for spaces (`transformer-architecture.md`)
 2. **Cross-reference**: use `[[wikilinks]]` to link between pages
 3. **Minimum links**: every new page must link to at least 2 existing pages
-4. **Raw is immutable**: never modify files in `raw/` — corrections go in wiki pages
+4. **Raw is immutable**: NEVER modify, rename, or delete files in `raw/`. Corrections and interpretations go in wiki pages under other directories.
 5. **Always log**: append to `log.md` after every action (ingest, update, query)
 6. **Read first**: before writing, check `SCHEMA.md`, `README.md`, and recent `log.md` entries
 7. **Git mode**: run `/wiki sync` after modifications

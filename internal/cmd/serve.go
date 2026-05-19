@@ -1,6 +1,6 @@
 //go:build !localonly
 
-package main
+package cmd
 
 import (
 	"flag"
@@ -14,7 +14,7 @@ import (
 	"wiki-tools/internal/git"
 )
 
-func init() { commands["serve"] = serveCmd }
+func init() { Register("serve", serveCmd) }
 
 func serveCmd(args []string) {
 	for _, a := range args {
@@ -23,7 +23,7 @@ func serveCmd(args []string) {
 			printServeHelp()
 			os.Exit(0)
 		case "--version":
-			fmt.Println("wiki-tools v" + version)
+			fmt.Println("wiki-tools v" + Version)
 			os.Exit(0)
 		}
 	}
@@ -52,7 +52,7 @@ func serveCmd(args []string) {
 	}
 
 	var err error
-	wikiPath, err = absPath(wikiPath)
+	wikiPath, err = AbsPath(wikiPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ 路径解析失败: %v\n", err)
 		os.Exit(3)
@@ -68,8 +68,8 @@ func serveCmd(args []string) {
 		os.Exit(1)
 	}
 
-	committerName := firstNonEmpty(*name, os.Getenv("GIT_SYNC_NAME"), "AI Assistant")
-	committerEmail := firstNonEmpty(*email, os.Getenv("GIT_SYNC_EMAIL"), "ai@local")
+	committerName := FirstNonEmpty(*name, os.Getenv("GIT_SYNC_NAME"), "AI Assistant")
+	committerEmail := FirstNonEmpty(*email, os.Getenv("GIT_SYNC_EMAIL"), "ai@local")
 
 	duration := time.Duration(*interval) * time.Minute
 	fmt.Printf("⏰ 定时同步守护进程已启动\n")
@@ -79,7 +79,7 @@ func serveCmd(args []string) {
 	fmt.Printf("   按 Ctrl+C 停止\n")
 	fmt.Println()
 
-	fmt.Printf("[%s] 执行首次同步...\n", timestamp())
+	fmt.Printf("[%s] 执行首次同步...\n", Timestamp())
 	if err := runSync(syncParams{
 		repoPath:       wikiPath,
 		committerName:  committerName,
@@ -97,7 +97,7 @@ func serveCmd(args []string) {
 	for {
 		select {
 		case <-ticker.C:
-			fmt.Printf("[%s] 执行定时同步...\n", timestamp())
+			fmt.Printf("[%s] 执行定时同步...\n", Timestamp())
 			if err := runSync(syncParams{
 				repoPath:       wikiPath,
 				committerName:  committerName,
@@ -106,7 +106,7 @@ func serveCmd(args []string) {
 				fmt.Printf("   ⚠️  同步出错: %v\n", err)
 			}
 		case sig := <-sigCh:
-			fmt.Printf("\n[%s] 收到 %v 信号，正在停止守护进程...\n", timestamp(), sig)
+			fmt.Printf("\n[%s] 收到 %v 信号，正在停止守护进程...\n", Timestamp(), sig)
 			return
 		}
 	}

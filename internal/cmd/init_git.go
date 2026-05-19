@@ -1,6 +1,6 @@
 //go:build !localonly
 
-package main
+package cmd
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	gitInitFn = initGitRepo
+	GitInitFn = initGitRepo
 }
 
 func initGitRepo(wikiPath string) {

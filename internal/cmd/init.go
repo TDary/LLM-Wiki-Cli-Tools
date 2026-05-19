@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"fmt"
@@ -9,14 +9,15 @@ import (
 	"wiki-tools/internal/wiki"
 )
 
+// GitInitFn is set by init_git.go (build tag !localonly) to initialize git repos.
+var GitInitFn func(string)
+
+func init() { Register("init", initCmd) }
+
 type initConfig struct {
 	wikiPath, domain, name string
 	noGit, force           bool
 }
-
-var gitInitFn func(string)
-
-func init() { commands["init"] = initCmd }
 
 func initCmd(args []string) {
 	for _, a := range args {
@@ -25,7 +26,7 @@ func initCmd(args []string) {
 			printInitHelp()
 			os.Exit(0)
 		case "--version":
-			fmt.Println("wiki-tools v" + version)
+			fmt.Println("wiki-tools v" + Version)
 			os.Exit(0)
 		}
 	}
@@ -69,7 +70,6 @@ func initCmd(args []string) {
 		os.Exit(2)
 	}
 
-	// Detect existing wiki
 	schemaPath := filepath.Join(wikiPath, "SCHEMA.md")
 	if wiki.FileExists(schemaPath) && !cfg.force {
 		fmt.Printf("ℹ️  检测到已有知识库: %s\n", wikiPath)
@@ -77,15 +77,15 @@ func initCmd(args []string) {
 		os.Exit(0)
 	}
 
-	hasGit := !cfg.noGit && gitInitFn != nil
+	hasGit := !cfg.noGit && GitInitFn != nil
 	if err := wiki.WriteFiles(wikiPath, projectName, cfg.domain, cfg.force, hasGit); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
 		os.Exit(2)
 	}
 
 	if !cfg.noGit {
-		if gitInitFn != nil {
-			gitInitFn(wikiPath)
+		if GitInitFn != nil {
+			GitInitFn(wikiPath)
 		} else {
 			fmt.Println("ℹ️  Git support not compiled in, skipping git init")
 		}
@@ -108,13 +108,18 @@ func parseInitArgs(args []string) initConfig {
 		a := args[i]
 		switch a {
 		case "--name":
-			i++; if i < len(args) { cfg.name = args[i] } else { fmt.Fprintln(os.Stderr, "--name requires a value"); os.Exit(1) }
+			i++
+			if i < len(args) {
+				cfg.name = args[i]
+			} else {
+				fmt.Fprintln(os.Stderr, "--name requires a value")
+				os.Exit(1)
+			}
 		case "--no-git":
 			cfg.noGit = true
 		case "--force":
 			cfg.force = true
 		case "-h", "--help", "--version":
-			// handled before
 		default:
 			if !strings.HasPrefix(a, "-") {
 				if cfg.wikiPath == "" {

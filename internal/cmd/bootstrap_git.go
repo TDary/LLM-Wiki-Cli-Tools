@@ -1,6 +1,6 @@
 //go:build !localonly
 
-package main
+package cmd
 
 import (
 	"fmt"
@@ -13,8 +13,8 @@ import (
 )
 
 func init() {
-	bootstrapGitFn = bootstrapGitFlow
-	dryRunGitFn = dryRunGitFlow
+	BootstrapGitFn = bootstrapGitFlow
+	DryRunGitFn = dryRunGitFlow
 }
 
 func dryRunGitFlow(cfg bootstrapConfig) {
@@ -56,7 +56,6 @@ func bootstrapGitFlow(cfg bootstrapConfig) {
 	}
 	fmt.Println()
 
-	// Step 1: Clone or verify
 	if !cfg.noClone {
 		if git.IsRepo(cfg.localPath) {
 			fmt.Println("Step 1: Git repo exists, skip clone")
@@ -86,7 +85,6 @@ func bootstrapGitFlow(cfg bootstrapConfig) {
 		}
 	}
 
-	// Step 2: wiki-init
 	fmt.Println()
 	fmt.Println("Step 2: initialize wiki structure")
 	if err := os.MkdirAll(cfg.localPath, 0755); err != nil {
@@ -102,7 +100,6 @@ func bootstrapGitFlow(cfg bootstrapConfig) {
 	fmt.Printf("   domain: %s\n", cfg.domain)
 	fmt.Printf("   dirs: %d subdirectories\n", len(wiki.Dirs))
 
-	// Step 3: Git config
 	fmt.Println()
 	fmt.Println("Step 3: Git config")
 	if !git.IsRepo(cfg.localPath) {
@@ -145,7 +142,6 @@ func bootstrapGitFlow(cfg bootstrapConfig) {
 	}
 	fmt.Println("   Git config completed")
 
-	// Step 4: Initial sync
 	fmt.Println()
 	fmt.Println("Step 4: initial sync")
 	defaultBranch := git.DefaultBranch(cfg.localPath)
@@ -166,7 +162,6 @@ func bootstrapGitFlow(cfg bootstrapConfig) {
 		fmt.Printf("   initial sync skipped: %v\n", err)
 	}
 
-	// Step 5: Daemon
 	fmt.Println()
 	if !cfg.noServe && cfg.syncInterval > 0 {
 		fmt.Printf("Step 5: periodic sync daemon (every %d min)\n", cfg.syncInterval)

@@ -48,7 +48,7 @@ Check `SCHEMA.md` first. The **Git 同步** field in the info table tells you th
 2. **Auto-sync after changes** — if Git mode, run `wiki-tools sync <path>` after any modification. If local mode, skip.
 3. **Cross-reference** — every new page must link to >=2 existing pages with `[[wikilinks]]`
 4. **Log everything** — append to `log.md` after every action (ingest, update, query)
-5. **Raw is immutable** — never modify files in `raw/`. Corrections go in wiki pages.
+5. **Raw is immutable** — NEVER modify, rename, or delete files in `raw/`. This is a hard constraint. Corrections and interpretations go in wiki pages under other directories.
 
 ## Directory Layout
 
@@ -67,10 +67,18 @@ Check `SCHEMA.md` first. The **Git 同步** field in the info table tells you th
 
 | Command | Purpose |
 |---------|---------|
-| `wiki-tools sync <path>` | Auto-commit + push any Git repo |
 | `wiki-tools init <path> <domain>` | Initialize wiki directory structure |
+| `wiki-tools sync <path>` | Auto-commit + push any Git repo |
 | `wiki-tools bootstrap <url> [path]` | One-command clone + init + config + sync |
 | `wiki-tools serve <path>` | Start periodic sync daemon (replaces cron) |
+| `wiki-tools list [path] [--format json] [--category CAT] [--tags TAG1,TAG2] [--include-raw]` | List all documents (raw/ excluded by default) |
+| `wiki-tools search <keyword> [path] [--format json] [--no-raw]` | Full-text search across documents |
+| `wiki-tools backlinks <page> [path] [--format json]` | Find all pages linking to a target |
+| `wiki-tools orphans [path] [--format json]` | Detect orphan documents with no inbound links |
+| `wiki-tools health [path] [--format json]` | Full health check (orphans, broken links, tags, links) |
+| `wiki-tools trace <page> [path] [--format json]` | Trace upstream/downstream dependency chain |
+| `wiki-tools fix [path] [--apply] [--format json]` | Auto-fix broken links and normalize naming (dry-run by default) |
+| `wiki-tools index [path] [--output FILE]` | Generate structured JSON index for frontend |
 
 Environment variables for `wiki-tools sync` (CLI flags take priority):
 

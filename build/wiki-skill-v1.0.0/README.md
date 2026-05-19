@@ -65,10 +65,22 @@ Each platform has two variants:
 ### CLI Quick Reference
 
 ```bash
+# Init & Sync
 wiki-tools init <PATH> "<DOMAIN>"              # New wiki
 wiki-tools bootstrap <URL> <PATH>              # Clone + init
 wiki-tools sync <PATH>                         # Auto-detect mode and sync
 wiki-tools serve <PATH> --interval 10          # Periodic sync daemon
+
+# Query & Analysis
+wiki-tools list <PATH>                         # List documents (raw/ excluded)
+wiki-tools list <PATH> --tags AI,tech          # Filter by tags
+wiki-tools search <KEYWORD> <PATH>             # Full-text search
+wiki-tools backlinks <PAGE> <PATH>             # Who links to this page?
+wiki-tools orphans <PATH>                      # Detect orphan documents
+wiki-tools health <PATH>                       # Full health check
+wiki-tools trace <PAGE> <PATH>                 # Trace dependency chain
+wiki-tools fix <PATH> --apply                  # Auto-fix broken links
+wiki-tools index <PATH> --pretty               # Generate JSON index
 ```
 
 ### Daemon Mode (binary only, not available in skill)
@@ -76,6 +88,10 @@ wiki-tools serve <PATH> --interval 10          # Periodic sync daemon
 ```bash
 wiki-tools serve ~/team-wiki --interval 10
 ```
+
+### Query Commands (available in both binary and skill)
+
+All query commands (`list`, `search`, `backlinks`, `orphans`, `health`, `trace`, `fix`, `index`) work with both the Go binary and the native Claude Code skill. The `raw/` directory is excluded from `list` by default (use `--include-raw` to show it).
 
 ## Directory Structure
 
