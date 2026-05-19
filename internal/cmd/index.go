@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -91,11 +92,10 @@ func indexCmd(args []string) {
 	}
 
 	if outputPath == "" {
-		outputPath = p + "/queries/index.json"
+		outputPath = filepath.Join(p, "queries", "index.json")
 	}
 	absOutput, _ := AbsPath(outputPath)
-	// Ensure parent dir exists
-	parentDir := absOutput[:strings.LastIndex(absOutput, "/")]
+	parentDir := filepath.Dir(absOutput)
 	os.MkdirAll(parentDir, 0755)
 
 	f, err := os.Create(absOutput)

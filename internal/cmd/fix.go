@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -170,7 +171,7 @@ func fixCmd(args []string) {
 		fmt.Printf("   ── 断链修复 (%d 处) ──\n", len(broken))
 		for _, f := range broken {
 			if apply {
-				fp := p + "/" + f.File
+				fp := filepath.Join(p, f.File)
 				data, err := os.ReadFile(fp)
 				if err != nil {
 					continue
@@ -199,7 +200,7 @@ func fixCmd(args []string) {
 		fmt.Printf("   ── 命名规范化 (%d 处) ──\n", len(norm))
 		for _, f := range norm {
 			if apply {
-				fp := p + "/" + f.File
+				fp := filepath.Join(p, f.File)
 				data, err := os.ReadFile(fp)
 				if err != nil {
 					continue

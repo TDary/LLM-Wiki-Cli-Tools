@@ -59,7 +59,7 @@ Pick your platform binary from `dist/`, rename to `wiki-tools`, add to PATH:
 | Windows x64 | `wiki-tools-windows-amd64.exe` |
 
 Each platform has two variants:
-- `wiki-tools-*` — full mode (init, sync, bootstrap, serve) with Git support, ~3.3MB
+- `wiki-tools-*` — full mode (12 commands: init, sync, bootstrap, serve, list, search, backlinks, orphans, health, trace, fix, index) with Git support, ~3.3MB
 - `wiki-tools-local-*` — local-only mode (init, bootstrap), zero Git dependency, ~2.7MB
 
 ### CLI Quick Reference
