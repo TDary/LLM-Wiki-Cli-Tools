@@ -40,7 +40,7 @@ This is **pure local mode**. There is no Git, no network, no sync. Files are the
 1. **Read before writing** — always check `SCHEMA.md`, `README.md`, and recent `log.md` first
 2. **Cross-reference** — every new page must link to >=2 existing pages with `[[wikilinks]]`
 3. **Log everything** — append to `log.md` after every action (ingest, update, query)
-4. **Raw is immutable** — never modify files in `raw/`. Corrections go in wiki pages.
+4. **Raw is immutable** — NEVER modify, rename, or delete files in `raw/`. This is a hard constraint. Corrections and interpretations go in wiki pages under other directories.
 5. **No sync needed** — files are the sole source of truth
 
 ## Directory Layout
@@ -62,8 +62,8 @@ This is **pure local mode**. There is no Git, no network, no sync. Files are the
 | `python scripts/wiki.py sync [path]` | Confirm local-only status |
 | `python scripts/wiki.py bootstrap <path>` | Bootstrap wiki at a given path |
 | `python scripts/wiki.py install <project>` | Install skill into a project |
-| `python scripts/wiki.py list [path] [--format json] [--category CAT] [--tags TAG1,TAG2]` | List all documents with metadata |
-| `python scripts/wiki.py search <keyword> [path] [--format json]` | Full-text search across documents |
+| `python scripts/wiki.py list [path] [--format json] [--category CAT] [--tags TAG1,TAG2] [--include-raw]` | List all documents (raw/ excluded by default) |
+| `python scripts/wiki.py search <keyword> [path] [--format json] [--no-raw]` | Full-text search across documents |
 | `python scripts/wiki.py backlinks <page> [path] [--format json]` | Find all pages linking to a target |
 | `python scripts/wiki.py orphans [path] [--format json]` | Detect orphan documents with no inbound links |
 | `python scripts/wiki.py index [path] [--output FILE]` | Generate structured JSON index for frontend |

@@ -82,7 +82,7 @@ Bootstrap a wiki at an existing or new path. Equivalent to `init` with the given
 ## /wiki list
 
 ```
-/wiki list [path] [--format table|json] [--category CAT] [--tags TAG1,TAG2] [--pretty]
+/wiki list [path] [--format table|json] [--category CAT] [--tags TAG1,TAG2] [--include-raw] [--pretty]
 ```
 
 List all knowledge documents in the wiki. Default: table format grouped by category.
@@ -91,19 +91,21 @@ List all knowledge documents in the wiki. Default: table format grouped by categ
 - `--format json` — output as JSON (with `--pretty` for indentation)
 - `--category concepts` — filter to a single directory
 - `--tags AI,tech` — filter by tags (comma-separated, matches any)
+- `--include-raw` — include `raw/` directory (excluded by default, as raw files are immutable)
 
 Output includes: title, file path, category, size, last modified time, tags, wiki-link count.
 
 ## /wiki search
 
 ```
-/wiki search <keyword> [path] [--format table|json] [--pretty]
+/wiki search <keyword> [path] [--format table|json] [--no-raw] [--pretty]
 ```
 
 Full-text search across all wiki documents. Case-insensitive substring matching on both titles and body content.
 
 **Options:**
 - `--format json` — output as JSON (with `--pretty` for indentation)
+- `--no-raw` — exclude `raw/` directory from search results
 
 Output includes: document title, file path, matching lines with line numbers.
 
@@ -167,7 +169,7 @@ When reading/writing wiki pages:
 1. **File names**: lowercase, hyphens (`transformer-architecture.md`)
 2. **Cross-reference**: use `[[wikilinks]]` between pages
 3. **Minimum links**: every new page links to >= 2 existing pages
-4. **Raw is immutable**: never modify files in `raw/` — corrections go in wiki pages
+4. **Raw is immutable**: NEVER modify, rename, or delete files in `raw/`. Corrections and interpretations go in wiki pages under other directories.
 5. **Always log**: append to `log.md` after every action
 6. **Read first**: before writing, check `SCHEMA.md`, `README.md`, and recent `log.md`
 
