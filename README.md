@@ -302,7 +302,7 @@ wiki-tools/
 │   └── AGENTS.md              # OpenClaw / Cursor / Copilot 适配
 ├── build/
 │   ├── local-wiki-skill/      # 纯本地版（Python，零依赖）
-│   └── wiki-skill-v1.0.0/     # 完整版（Go 二进制 + 安装脚本）
+│   └── wiki-skill-v1.0.5/     # 完整版（Go 二进制 + 安装脚本）
 ├── dist/                      # 跨平台预编译二进制（10 个）
 └── README.md
 ```

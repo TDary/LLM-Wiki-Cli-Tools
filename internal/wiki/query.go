@@ -156,7 +156,7 @@ func CollectDocuments(wikiPath string) []Doc {
 			if title == "" {
 				title = ExtractTitle(text, stem)
 			}
-			relFile := d + "/" + e.Name()
+			relFile := filepath.Join(d, e.Name())
 			absPath, _ := filepath.Abs(fp)
 			docs = append(docs, Doc{
 				Title:         title,
@@ -207,7 +207,7 @@ func BuildBacklinkMap(wikiPath string) map[string][]BacklinkEntry {
 			if title == "" {
 				title = ExtractTitle(text, stem)
 			}
-			relFile := d + "/" + e.Name()
+			relFile := filepath.Join(d, e.Name())
 			lines := strings.Split(text, "\n")
 			matches := wikilinkRe.FindAllStringSubmatch(text, -1)
 			for _, m := range matches {
@@ -310,7 +310,7 @@ func BuildLinkGraph(wikiPath string) LinkGraph {
 			if title == "" {
 				title = ExtractTitle(text, stem)
 			}
-			relFile := d + "/" + e.Name()
+			relFile := filepath.Join(d, e.Name())
 			g.DocInfo[stem] = LinkGraphInfo{Title: title, File: relFile, Category: d}
 			matches := wikilinkRe.FindAllStringSubmatch(text, -1)
 			var targets []string

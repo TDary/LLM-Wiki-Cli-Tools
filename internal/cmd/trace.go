@@ -23,7 +23,10 @@ func traceCmd(args []string) {
 			fmt.Println("用法: wiki-tools trace <page> [WIKI_PATH] [--format table|json] [--pretty]")
 			os.Exit(0)
 		case "--format":
-			i++; if i < len(args) { format = args[i] }
+			i++
+			if i < len(args) {
+				format = args[i]
+			}
 		case "--pretty":
 			pretty = true
 		default:

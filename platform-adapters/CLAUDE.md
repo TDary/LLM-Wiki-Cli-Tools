@@ -37,9 +37,35 @@ wiki-tools init <path> "<domain description>"
 wiki-tools serve ~/team-wiki --interval 10
 ```
 
+**List documents:**
+```bash
+wiki-tools list ~/team-wiki
+wiki-tools list ~/team-wiki --tags Unity,performance
+wiki-tools list ~/team-wiki --include-raw
+```
+
 **Search the wiki:**
 ```bash
-grep -r "search term" ~/team-wiki/entities/ ~/team-wiki/concepts/ --include="*.md"
+wiki-tools search "关键词" ~/team-wiki
+wiki-tools search "Unity" ~/team-wiki --no-raw
+```
+
+**Check document relationships:**
+```bash
+wiki-tools backlinks unity-ugui ~/team-wiki
+wiki-tools trace draw-call-optimization ~/team-wiki
+```
+
+**Health check and self-healing:**
+```bash
+wiki-tools health ~/team-wiki
+wiki-tools fix ~/team-wiki          # dry-run preview
+wiki-tools fix ~/team-wiki --apply  # auto-fix broken links
+```
+
+**Generate frontend index:**
+```bash
+wiki-tools index ~/team-wiki --pretty
 ```
 
 ## Wiki Structure
@@ -72,6 +98,7 @@ Check `SCHEMA.md` first. The "Git 同步" field in the info table tells you what
 - Cross-reference with `[[wikilinks]]`
 - Every page must link to at least 2 other pages
 - Update `log.md` after every action
+- **Raw is immutable**: NEVER modify, rename, or delete files in `raw/`. Corrections and interpretations go in wiki pages.
 - Git mode: use `wiki-tools sync` after modifications — never run raw `git push` directly
 - Local mode: skip all Git operations; files are the sole source of truth
 
