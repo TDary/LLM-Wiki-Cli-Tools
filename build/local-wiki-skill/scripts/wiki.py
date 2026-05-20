@@ -2,7 +2,9 @@
 """wiki-tools — Local wiki management (pure local mode, no Git)."""
 
 import argparse
+import json
 import re
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +16,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-VERSION = "1.0.5"
+VERSION = "1.1.0"
 
 DIRS = ["raw", "entities", "concepts", "relations", "queries", "drafts"]
 
@@ -27,27 +29,24 @@ CATEGORY_LABELS = {
     "drafts": "草稿",
 }
 
+SYSTEM_FILES = {"readme.md", "log.md", "schema.md"}
 
 # ── helpers ──
 
 def now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-
 def today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
-
 def expand(s: str) -> Path:
     return Path(s).expanduser().resolve()
-
 
 def require_wiki(path: Path) -> None:
     """Exit if path is not a valid wiki directory."""
     if not (path / "SCHEMA.md").exists():
         print(f"❌ 未找到 SCHEMA.md: {path} 不是一个 wiki 目录")
         sys.exit(1)
-
 
 # ── templates ──
 
@@ -100,7 +99,6 @@ relations:
 ```
 """
 
-
 def template_readme(name: str, domain: str) -> str:
     return f"""# {name}
 
@@ -121,7 +119,6 @@ def template_readme(name: str, domain: str) -> str:
 参见 [log.md](./log.md)
 """
 
-
 def template_log() -> str:
     return f"""# 更新日志
 
@@ -129,7 +126,6 @@ def template_log() -> str:
 
 - 🎉 知识库初始化完成
 """
-
 
 # ── document helpers ──
 
@@ -144,14 +140,12 @@ def extract_title(filepath: Path) -> str:
         pass
     return filepath.stem.replace("-", " ").title()
 
-
 def extract_frontmatter(filepath: Path) -> dict:
     """Extract YAML-style frontmatter between --- markers."""
     try:
         return extract_frontmatter_from_text(filepath.read_text(encoding="utf-8"))
     except Exception:
         return {}
-
 
 def extract_frontmatter_from_text(text: str) -> dict:
     """Extract YAML-style frontmatter from raw text."""
@@ -171,7 +165,6 @@ def extract_frontmatter_from_text(text: str) -> dict:
                 else:
                     fm[key] = val
     return fm
-
 
 def build_backlink_map(wiki_path: Path) -> dict[str, list[dict]]:
     """Build a map of {target_file: [source_doc_info, ...]} from all wikilinks."""
@@ -205,17 +198,23 @@ def build_backlink_map(wiki_path: Path) -> dict[str, list[dict]]:
                         })
     return backlinks
 
+def search_documents(docs: list[dict], keyword: str, regex: bool = False) -> list[dict]:
+    """Search documents by keyword or regex pattern in title and body content."""
+    if regex:
+        try:
+            matcher = re.compile(keyword).search
+        except re.error as e:
+            print(f"❌ 无效正则表达式: {e}")
+            sys.exit(1)
+    else:
+        kw_lower = keyword.lower()
+        matcher = lambda s: kw_lower in s.lower()
 
-def search_documents(docs: list[dict], keyword: str) -> list[dict]:
-    """Search documents by keyword in title and body content (case-insensitive)."""
     results = []
-    kw_lower = keyword.lower()
     for doc in docs:
         matches_in_file = []
-        # Check title
-        if kw_lower in doc["title"].lower():
+        if matcher(doc["title"]):
             matches_in_file.append({"line": 0, "content": doc["title"]})
-        # Check body from cached text
         text = doc.get("_text", "")
         if not text:
             try:
@@ -223,7 +222,7 @@ def search_documents(docs: list[dict], keyword: str) -> list[dict]:
             except Exception:
                 pass
         for line_no, line in enumerate(text.splitlines(), 1):
-            if kw_lower in line.lower():
+            if matcher(line):
                 matches_in_file.append({"line": line_no, "content": line.strip()})
         if matches_in_file:
             out = {k: v for k, v in doc.items() if k != "_text"}
@@ -231,7 +230,6 @@ def search_documents(docs: list[dict], keyword: str) -> list[dict]:
             out["match_count"] = len(matches_in_file)
             results.append(out)
     return results
-
 
 def collect_documents(wiki_path: Path) -> list[dict]:
     """Walk all category dirs and collect markdown file metadata."""
@@ -261,7 +259,6 @@ def collect_documents(wiki_path: Path) -> list[dict]:
             })
     return docs
 
-
 def read_schema_meta(wiki_path: Path) -> dict:
     """Read basic metadata from SCHEMA.md."""
     meta = {"name": wiki_path.name, "domain": "Wiki 知识库"}
@@ -287,6 +284,97 @@ def read_schema_meta(wiki_path: Path) -> dict:
         pass
     return meta
 
+def _extract_yaml_block(wiki_path: Path, section_keyword: str) -> list[str]:
+    """Extract YAML lines from a ```yaml block under a ## section in SCHEMA.md."""
+    schema_path = wiki_path / "SCHEMA.md"
+    if not schema_path.exists():
+        return []
+    try:
+        lines = schema_path.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return []
+    in_yaml = False
+    in_section = False
+    yaml_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            in_section = section_keyword in stripped
+            in_yaml = False
+            continue
+        if in_section and stripped == "```yaml":
+            in_yaml = True
+            continue
+        if in_yaml and stripped == "```":
+            break
+        if in_yaml and in_section:
+            yaml_lines.append(line)
+    return yaml_lines
+
+def _parse_yaml_kv_pairs(yaml_lines: list[str]) -> dict[str, str]:
+    """Parse simple 'key: value' pairs from YAML lines, skipping known headers."""
+    result = {}
+    for yl in yaml_lines:
+        yl = yl.strip()
+        if not yl or yl.endswith(":"):
+            continue
+        if ":" in yl:
+            key, _, val = yl.partition(":")
+            result[key.strip()] = val.strip().strip("\"'")
+    return result
+
+HEALTH_WEIGHT_DEFAULTS = {
+    "orphan": 3, "broken_link": 5, "no_tag": 1,
+    "low_link": 2, "empty_doc": 2, "self_link": 1,
+}
+
+def read_health_config(wiki_path: Path) -> dict:
+    """Read configurable health check weights from SCHEMA.md."""
+    config = dict(HEALTH_WEIGHT_DEFAULTS)
+    for key, val in _parse_yaml_kv_pairs(_extract_yaml_block(wiki_path, "健康检查")).items():
+        try:
+            n = int(val)
+            if n > 0:
+                config[key] = n
+        except ValueError:
+            pass
+    return config
+
+def read_custom_checks(wiki_path: Path) -> list[dict]:
+    """Read custom health checks from SCHEMA.md."""
+    yaml_lines = _extract_yaml_block(wiki_path, "自定义检查")
+    checks = []
+    current = {}
+    for yl in yaml_lines:
+        yl = yl.strip()
+        if not yl or yl == "checks:":
+            continue
+        if yl.startswith("- "):
+            if current.get("name"):
+                checks.append(current)
+            current = {"weight": 1}
+            kv = _parse_yaml_kv_pairs(["  " + yl[2:]])
+            for k, v in kv.items():
+                if k in ("name", "command", "description"):
+                    current[k] = v
+                elif k == "weight":
+                    try:
+                        current["weight"] = int(v)
+                    except ValueError:
+                        pass
+            continue
+        kv = _parse_yaml_kv_pairs([yl])
+        for k, v in kv.items():
+            if k in ("name", "command", "description"):
+                current[k] = v
+            elif k == "weight":
+                try:
+                    current["weight"] = int(v)
+                except ValueError:
+                    pass
+    if current.get("name"):
+        checks.append(current)
+    return checks
 
 # ── commands ──
 
@@ -328,13 +416,11 @@ def cmd_init(args: argparse.Namespace) -> None:
     print(f"   模式: 本地（纯文件）")
     print(f"   目录: {len(DIRS)} 个子目录")
 
-
 def cmd_sync(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
     require_wiki(path)
 
     print(f"ℹ️  本地模式 — 无需同步，文件即唯一真相来源: {path}")
-
 
 def cmd_bootstrap(args: argparse.Namespace) -> None:
     path = expand(args.path)
@@ -351,7 +437,6 @@ def cmd_bootstrap(args: argparse.Namespace) -> None:
         path=str(path), domain=domain, name=args.name or path.name,
         force=args.force,
     ))
-
 
 def cmd_install(args: argparse.Namespace) -> None:
     """Install skill files into a project (Claude Code, Copilot, Cursor, Windsurf, OpenClaw)."""
@@ -385,11 +470,9 @@ def cmd_install(args: argparse.Namespace) -> None:
     print()
     print("Done. The skill is now active for Claude Code + all AGENTS.md-compatible tools.")
 
-
 def _strip_internal(docs: list[dict]) -> list[dict]:
     """Remove internal fields (_text) before serialization."""
     return [{k: v for k, v in d.items() if not k.startswith("_")} for d in docs]
-
 
 def cmd_list(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
@@ -410,7 +493,7 @@ def cmd_list(args: argparse.Namespace) -> None:
         docs = [d for d in docs if filter_tags & {t.lower() for t in d.get("tags", [])}]
 
     if args.format == "json":
-        import json
+
         meta = read_schema_meta(path)
         output = {
             "wiki": meta,
@@ -436,7 +519,6 @@ def cmd_list(args: argparse.Namespace) -> None:
         print(f"    {d['title']}")
         print(f"    ├─ {d['file']}  ({d['size']}B, {d['modified']}){tags_str}{links_str}{readonly}")
         print()
-
 
 def cmd_index(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
@@ -486,7 +568,6 @@ def cmd_index(args: argparse.Namespace) -> None:
     print(f"   分类数: {len(by_category)}")
     print(f"   标签: {', '.join(sorted(all_tags)) if all_tags else '无'}")
 
-
 def cmd_search(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
     require_wiki(path)
@@ -497,10 +578,13 @@ def cmd_search(args: argparse.Namespace) -> None:
     if getattr(args, "no_raw", False):
         docs = [d for d in docs if d["category"] != "raw"]
 
-    results = search_documents(docs, args.keyword)
+    if getattr(args, "regex", False):
+        results = search_documents(docs, args.keyword, regex=True)
+    else:
+        results = search_documents(docs, args.keyword)
 
     if args.format == "json":
-        import json
+
         meta = read_schema_meta(path)
         output = {
             "wiki": meta,
@@ -527,7 +611,6 @@ def cmd_search(args: argparse.Namespace) -> None:
             print(f"     ... 共 {r['match_count']} 处匹配")
         print()
 
-
 def cmd_backlinks(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
     require_wiki(path)
@@ -543,7 +626,7 @@ def cmd_backlinks(args: argparse.Namespace) -> None:
     refs = backlinks.get(target_stem, [])
 
     if args.format == "json":
-        import json
+
         meta = read_schema_meta(path)
         output = {
             "wiki": meta,
@@ -569,7 +652,6 @@ def cmd_backlinks(args: argparse.Namespace) -> None:
             print(f"     {content}")
             print()
 
-
 def cmd_orphans(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
     require_wiki(path)
@@ -578,19 +660,18 @@ def cmd_orphans(args: argparse.Namespace) -> None:
     backlinks = build_backlink_map(path)
 
     # System files to exclude
-    system_files = {"readme.md", "log.md", "schema.md"}
     orphans = []
     for doc in docs:
         if doc["category"] == "raw":
             continue
         stem = Path(doc["file"]).stem.lower()
-        if stem in system_files:
+        if stem in SYSTEM_FILES:
             continue
         if stem not in backlinks or len(backlinks[stem]) == 0:
             orphans.append(doc)
 
     if args.format == "json":
-        import json
+
         meta = read_schema_meta(path)
         output = {
             "wiki": meta,
@@ -617,7 +698,6 @@ def cmd_orphans(args: argparse.Namespace) -> None:
         print()
         print("💡 建议: 在相关文档中添加 [[wikilinks]] 指向孤立文档，或将它们合并到其他页面。")
 
-
 def cmd_health(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
     require_wiki(path)
@@ -625,9 +705,11 @@ def cmd_health(args: argparse.Namespace) -> None:
     docs = collect_documents(path)
     backlinks = build_backlink_map(path)
 
+    # Read configurable weights
+    weights = read_health_config(path)
+
     # Exclude system files and raw/ (immutable source material)
-    system_files = {"readme.md", "log.md", "schema.md"}
-    user_docs = [d for d in docs if d["category"] != "raw" and Path(d["file"]).stem.lower() not in system_files]
+    user_docs = [d for d in docs if d["category"] != "raw" and Path(d["file"]).stem.lower() not in SYSTEM_FILES]
 
     # Build set of all existing page stems for broken link detection
     existing_stems = {Path(d["file"]).stem.lower() for d in docs}
@@ -687,16 +769,59 @@ def cmd_health(args: argparse.Namespace) -> None:
                         "link": m.group(1),
                     })
 
-    # Calculate health score (100 = perfect)
+    # Custom checks
+    custom_checks = read_custom_checks(path)
+    custom_results = []
+    custom_deduction = 0
+
+    for check in custom_checks:
+        result = {
+            "name": check.get("name", ""),
+            "description": check.get("description", ""),
+            "weight": check.get("weight", 1),
+            "issues": [],
+            "count": 0,
+        }
+        cmd = check.get("command", "")
+        if cmd:
+            try:
+                proc = subprocess.run(
+                    cmd, shell=True, capture_output=True, text=True,
+                    timeout=5, cwd=str(path),
+                )
+                if proc.stdout.strip():
+                    lines = [l.strip() for l in proc.stdout.strip().splitlines() if l.strip()]
+                    result["issues"] = lines
+                    result["count"] = len(lines)
+                elif proc.returncode != 0 and proc.stderr.strip():
+                    result["issues"] = [proc.stderr.strip()[:200]]
+                    result["count"] = 1
+            except subprocess.TimeoutExpired:
+                result["issues"] = ["命令超时（5 秒）"]
+                result["count"] = 1
+            except Exception as e:
+                result["issues"] = [str(e)[:200]]
+                result["count"] = 1
+        if result["count"] > 0:
+            custom_deduction += result["count"] * result["weight"]
+        custom_results.append(result)
+
+    # Calculate health score with configurable weights
     total_checks = len(user_docs) if user_docs else 1
-    deductions = 0
-    deductions += len(orphans) * 3          # -3 per orphan
-    deductions += len(broken_links) * 5     # -5 per broken link (most severe)
-    deductions += len(no_tags) * 1          # -1 per untagged doc
-    deductions += len(low_links) * 2        # -2 per low-link doc
-    deductions += len(empty_docs) * 2       # -2 per empty doc
-    deductions += len(self_links) * 1       # -1 per self-link
-    score = max(0, min(100, 100 - int(deductions * 100 / (total_checks * 6))))
+    sum_weights = (weights.get("orphan", 3) + weights.get("broken_link", 5) +
+                   weights.get("no_tag", 1) + weights.get("low_link", 2) +
+                   weights.get("empty_doc", 2) + weights.get("self_link", 1))
+    if sum_weights == 0:
+        sum_weights = 6
+    deductions = (
+        len(orphans) * weights.get("orphan", 3) +
+        len(broken_links) * weights.get("broken_link", 5) +
+        len(no_tags) * weights.get("no_tag", 1) +
+        len(low_links) * weights.get("low_link", 2) +
+        len(empty_docs) * weights.get("empty_doc", 2) +
+        len(self_links) * weights.get("self_link", 1)
+    )
+    score = max(0, min(100, 100 - (deductions + custom_deduction) * 100 // (total_checks * sum_weights)))
 
     # Status icon
     def status_icon(count: int, threshold: int = 0) -> str:
@@ -708,12 +833,13 @@ def cmd_health(args: argparse.Namespace) -> None:
             return "❌"
 
     if args.format == "json":
-        import json
+
         meta = read_schema_meta(path)
         output = {
             "wiki": meta,
             "score": score,
             "total_documents": len(user_docs),
+            "weights": weights,
             "checks": {
                 "orphans": {"count": len(orphans), "items": orphans},
                 "broken_links": {"count": len(broken_links), "items": broken_links},
@@ -721,6 +847,7 @@ def cmd_health(args: argparse.Namespace) -> None:
                 "low_links": {"count": len(low_links), "items": _strip_internal(low_links)},
                 "empty_docs": {"count": len(empty_docs), "items": _strip_internal(empty_docs)},
                 "self_links": {"count": len(self_links), "items": self_links},
+                "custom": custom_results,
             },
         }
         print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
@@ -731,14 +858,18 @@ def cmd_health(args: argparse.Namespace) -> None:
     print(f"\n🏥 {meta['name']} — 知识库健康报告")
     print(f"   文档总数: {len(user_docs)}\n")
 
-    print(f"   {status_icon(len(orphans), 5)} 孤立文档:     {len(orphans)} 篇")
-    print(f"   {status_icon(len(broken_links))} 断链:         {len(broken_links)} 处")
-    print(f"   {status_icon(len(no_tags), 5)} 无标签文档:   {len(no_tags)} 篇")
-    print(f"   {status_icon(len(low_links), 5)} 链接不足:     {len(low_links)} 篇 (< 2 条链接)")
-    print(f"   {status_icon(len(empty_docs), 3)} 空文档:       {len(empty_docs)} 篇 (< 50 字节)")
-    print(f"   {status_icon(len(self_links))} 自引用:       {len(self_links)} 处")
-    print()
-    print(f"   健康评分: {score}/100")
+    print(f"   {status_icon(len(orphans), 5)} 孤立文档:     {len(orphans)} 篇 (权重 {weights.get('orphan', 3)})")
+    print(f"   {status_icon(len(broken_links))} 断链:         {len(broken_links)} 处 (权重 {weights.get('broken_link', 5)})")
+    print(f"   {status_icon(len(no_tags), 5)} 无标签文档:   {len(no_tags)} 篇 (权重 {weights.get('no_tag', 1)})")
+    print(f"   {status_icon(len(low_links), 5)} 链接不足:     {len(low_links)} 篇 (< 2 条链接, 权重 {weights.get('low_link', 2)})")
+    print(f"   {status_icon(len(empty_docs), 3)} 空文档:       {len(empty_docs)} 篇 (< 50 字节, 权重 {weights.get('empty_doc', 2)})")
+    print(f"   {status_icon(len(self_links))} 自引用:       {len(self_links)} 处 (权重 {weights.get('self_link', 1)})")
+
+    for cr in custom_results:
+        icon = "✅" if cr["count"] == 0 else "⚠️"
+        print(f"   {icon} {cr['name']:<14} {cr['count']} 处 (权重 {cr['weight']})")
+
+    print(f"\n   健康评分: {score}/100")
 
     # Show details for issues
     if broken_links:
@@ -770,6 +901,15 @@ def cmd_health(args: argparse.Namespace) -> None:
         if len(self_links) > 10:
             print(f"   ... 共 {len(self_links)} 处自引用")
 
+    # Show custom check details
+    for cr in custom_results:
+        if cr["count"] > 0:
+            print(f"\n   ── {cr['name']} ──")
+            for issue in cr["issues"][:10]:
+                print(f"   ⚠️  {issue}")
+            if len(cr["issues"]) > 10:
+                print(f"   ... 共 {len(cr['issues'])} 处")
+
     # Suggestions
     issues = []
     if broken_links:
@@ -784,6 +924,9 @@ def cmd_health(args: argparse.Namespace) -> None:
         issues.append("补充空文档内容或删除无用占位页")
     if self_links:
         issues.append("移除自引用链接（页面不应链接到自身）")
+    for cr in custom_results:
+        if cr["count"] > 0:
+            issues.append(f"{cr['name']}: {cr['description']}")
 
     if issues:
         print(f"\n   💡 建议:")
@@ -791,7 +934,6 @@ def cmd_health(args: argparse.Namespace) -> None:
             print(f"      {i}. {issue}")
     else:
         print(f"\n   🎉 知识库状态良好，没有发现明显问题。")
-
 
 def _build_link_graph(wiki_path: Path) -> tuple[dict[str, list[str]], dict[str, dict]]:
     """Build bidirectional link graph. Returns (outbound_map, doc_info_map)."""
@@ -821,30 +963,16 @@ def _build_link_graph(wiki_path: Path) -> tuple[dict[str, list[str]], dict[str, 
 
     return outbound, doc_info
 
-
-def _trace_downstream(stem: str, inbound: dict[str, list[str]], visited: set, depth: int) -> list[dict]:
-    """Recursively trace downstream (who links to this page)."""
+def _trace_graph(stem: str, adjacency: dict[str, list[str]], visited: set, depth: int) -> list[dict]:
+    """Recursively trace through a link graph."""
     results = []
     if depth > 10 or stem in visited:
         return results
     visited.add(stem)
-    for source_stem in inbound.get(stem, []):
-        results.append({"stem": source_stem, "depth": depth})
-        results.extend(_trace_downstream(source_stem, inbound, visited, depth + 1))
+    for neighbor in adjacency.get(stem, []):
+        results.append({"stem": neighbor, "depth": depth})
+        results.extend(_trace_graph(neighbor, adjacency, visited, depth + 1))
     return results
-
-
-def _trace_upstream(stem: str, outbound: dict[str, list[str]], visited: set, depth: int) -> list[dict]:
-    """Recursively trace upstream (what this page links to)."""
-    results = []
-    if depth > 10 or stem in visited:
-        return results
-    visited.add(stem)
-    for target_stem in outbound.get(stem, []):
-        results.append({"stem": target_stem, "depth": depth})
-        results.extend(_trace_upstream(target_stem, outbound, visited, depth + 1))
-    return results
-
 
 def cmd_trace(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
@@ -872,12 +1000,12 @@ def cmd_trace(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     # Trace upstream (what this page links to)
-    upstream = _trace_upstream(target_stem, outbound, set(), 1)
+    upstream = _trace_graph(target_stem, outbound, set(), 1)
     # Trace downstream (what links to this page)
-    downstream = _trace_downstream(target_stem, inbound, set(), 1)
+    downstream = _trace_graph(target_stem, inbound, set(), 1)
 
     if args.format == "json":
-        import json
+
         meta = read_schema_meta(path)
 
         def _enrich(items):
@@ -940,7 +1068,6 @@ def cmd_trace(args: argparse.Namespace) -> None:
     print(f"\n   上游引用: {len(set(i['stem'] for i in upstream))} 个")
     print(f"   下游被引: {len(set(i['stem'] for i in downstream))} 个")
 
-
 def _find_closest(target: str, candidates: list[str]) -> str | None:
     """Find the closest matching stem using edit distance."""
     best = None
@@ -962,7 +1089,6 @@ def _find_closest(target: str, candidates: list[str]) -> str | None:
             best_score = score
             best = c
     return best if best_score > 0.3 else None
-
 
 def cmd_fix(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
@@ -1028,7 +1154,7 @@ def cmd_fix(args: argparse.Namespace) -> None:
     fixes = unique_fixes
 
     if args.format == "json":
-        import json
+
         meta = read_schema_meta(path)
         output = {
             "wiki": meta,
@@ -1040,7 +1166,11 @@ def cmd_fix(args: argparse.Namespace) -> None:
         return
 
     # Table format
-    mode = "预览" if not args.apply else "执行"
+    interactive = getattr(args, "interactive", False)
+    if args.apply:
+        mode = "交互执行" if interactive else "执行"
+    else:
+        mode = "预览"
     print(f"\n🔧 自愈检查 — {mode}模式")
     print(f"   发现 {len(fixes)} 个可修复项\n")
 
@@ -1052,20 +1182,47 @@ def cmd_fix(args: argparse.Namespace) -> None:
     broken = [f for f in fixes if f["type"] == "broken_link"]
     norm = [f for f in fixes if f["type"] == "normalize"]
 
+    skip_types: set[str] = set()
+    applied_count = 0
+    skipped_count = 0
+
+    def _apply_fix(fix: dict, skip_label: str) -> str:
+        """Apply a single fix with optional interactive confirmation. Returns 'applied'/'skipped'/'skip_remaining'."""
+        nonlocal applied_count, skipped_count
+        if interactive and fix["type"] not in skip_types:
+            status = "✅ 可修复" if fix["suggestion"] else "⚠️  需手动"
+            print(f"   {status}  {fix['file']}: {fix['action']}")
+            try:
+                ans = input(f"   确认? [y/n/s=跳过剩余{skip_label}] ").strip().lower()
+            except EOFError:
+                ans = "y"
+            if ans == "s":
+                skip_types.add(fix["type"])
+                skipped_count += 1
+                print(f"   ⏭️  跳过剩余{skip_label}")
+                return "skip_remaining"
+            elif ans == "n":
+                skipped_count += 1
+                print(f"   ⏭️  已跳过")
+                return "skipped"
+
+        filepath = path / fix["file"]
+        text = filepath.read_text(encoding="utf-8")
+        if fix["suggestion"]:
+            info = doc_info[fix["suggestion"]]
+            new_text = text.replace(f"[[{fix['original']}]]", f"[[{info['title']}]]")
+            filepath.write_text(new_text, encoding="utf-8")
+            print(f"   ✅ {fix['file']}: {fix['action']}")
+            applied_count += 1
+        else:
+            print(f"   ⏭️  {fix['file']}: {fix['action']} (需手动处理)")
+        return "applied"
+
     if broken:
         print(f"   ── 断链修复 ({len(broken)} 处) ──")
         for f in broken:
             if args.apply:
-                # Apply fix: replace in file
-                filepath = path / f["file"]
-                text = filepath.read_text(encoding="utf-8")
-                if f["suggestion"]:
-                    info = doc_info[f["suggestion"]]
-                    new_text = text.replace(f"[[{f['original']}]]", f"[[{info['title']}]]")
-                    filepath.write_text(new_text, encoding="utf-8")
-                    print(f"   ✅ {f['file']}: {f['action']}")
-                else:
-                    print(f"   ⏭️  {f['file']}: {f['action']} (需手动处理)")
+                _apply_fix(f, "断链修复")
             else:
                 status = "✅ 可修复" if f["suggestion"] else "⚠️  需手动"
                 print(f"   {status}  {f['file']}: {f['action']}")
@@ -1075,11 +1232,7 @@ def cmd_fix(args: argparse.Namespace) -> None:
         print(f"   ── 命名规范化 ({len(norm)} 处) ──")
         for f in norm:
             if args.apply:
-                filepath = path / f["file"]
-                text = filepath.read_text(encoding="utf-8")
-                new_text = text.replace(f"[[{f['original']}]]", f"[[{f['suggestion']}]]")
-                filepath.write_text(new_text, encoding="utf-8")
-                print(f"   ✅ {f['file']}: {f['action']}")
+                _apply_fix(f, "规范化")
             else:
                 print(f"   ✅ 可修复  {f['file']}: {f['action']}")
         print()
@@ -1089,7 +1242,280 @@ def cmd_fix(args: argparse.Namespace) -> None:
         manual_count = len(fixes) - auto_count
         print(f"   💡 {auto_count} 项可自动修复，{manual_count} 项需手动处理。")
         print(f"      使用 --apply 执行自动修复。")
+        if not getattr(args, "interactive", False):
+            print(f"      使用 --interactive 逐条确认。")
+    elif getattr(args, "interactive", False):
+        print(f"   已应用 {applied_count} 项，跳过 {skipped_count} 项。")
 
+def cmd_rename(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    old_name = args.old_name
+    new_name = args.new_name
+
+    # Normalize stems
+    old_stem = old_name.strip().lower().replace(" ", "-")
+    new_stem = new_name.strip().lower().replace(" ", "-")
+    new_title = new_name.strip().replace("-", " ").title()
+
+    # Find the source document
+    docs = collect_documents(path)
+    source_doc = None
+    for d in docs:
+        stem = Path(d["file"]).stem.lower()
+        if stem == old_stem:
+            source_doc = d
+            break
+    if not source_doc:
+        print(f"❌ 未找到文档: {old_name}")
+        sys.exit(1)
+
+    old_title = source_doc["title"]
+
+    # Collect all rename actions
+    actions = []
+
+    # 1. Rename file action
+    old_rel = source_doc["file"]
+    new_rel = str(Path(old_rel).parent / (new_stem + ".md"))
+    actions.append({
+        "type": "rename_file",
+        "file": old_rel,
+        "original": old_rel,
+        "new": new_rel,
+    })
+
+    # 2. Scan all docs for wikilink references to old name
+    for d in docs:
+        text = d.get("_text", "")
+        for m in re.finditer(r"\[\[(.+?)\]\]", text):
+            link_target = m.group(1).strip().lower().replace(" ", "-")
+            if link_target == old_stem:
+                actions.append({
+                    "type": "update_link",
+                    "file": d["file"],
+                    "original": f"[[{m.group(1)}]]",
+                    "new": f"[[{new_title}]]",
+                })
+
+    # 3. Update internal heading if it matches old title
+    for line_no, line in enumerate(source_doc.get("_text", "").splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith("# ") and not stripped.startswith("## "):
+            heading = stripped[2:]
+            if heading == old_title:
+                actions.append({
+                    "type": "update_heading",
+                    "file": old_rel,
+                    "original": f"# {old_title}",
+                    "new": f"# {new_title}",
+                })
+
+    if args.format == "json":
+
+        meta = read_schema_meta(path)
+        output = {
+            "wiki": meta,
+            "old": old_name,
+            "new": new_name,
+            "dry_run": not getattr(args, "apply", False),
+            "total": len(actions),
+            "actions": actions,
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    print(f"\n📝 重命名: [[{old_title}]] → [[{new_title}]]")
+    print(f"   影响 {len(actions)} 处\n")
+
+    if not actions:
+        print("   ✅ 无需修改。")
+        return
+
+    for a in actions:
+        print(f"   {a['type']}: {a['original']} → {a['new']}")
+
+    if getattr(args, "apply", False):
+        # Update links in all files FIRST (before renaming source file)
+        files_to_update: set[str] = set()
+        for a in actions:
+            if a["type"] in ("update_link", "update_heading"):
+                files_to_update.add(a["file"])
+
+        for f in files_to_update:
+            fp = path / f
+            text = fp.read_text(encoding="utf-8")
+            for a in actions:
+                if a["file"] == f:
+                    text = text.replace(a["original"], a["new"])
+            fp.write_text(text, encoding="utf-8")
+            print(f"   ✅ 已更新: {f}")
+
+        # Rename file AFTER content updates
+        old_path = path / old_rel
+        new_path = path / new_rel
+        old_path.rename(new_path)
+        print(f"\n   ✅ 文件已重命名: {old_rel} → {new_rel}")
+        print(f"\n   重命名完成！")
+    else:
+        print(f"\n   💡 使用 --apply 执行重命名。")
+
+def cmd_tags(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    docs = collect_documents(path)
+
+    # Build tag index (exclude raw/)
+    tag_map: dict[str, dict] = {}
+    for d in docs:
+        if d["category"] == "raw":
+            continue
+        for t in d.get("tags", []):
+            t = t.strip()
+            if not t:
+                continue
+            if t not in tag_map:
+                tag_map[t] = {"tag": t, "count": 0, "documents": []}
+            tag_map[t]["count"] += 1
+            tag_map[t]["documents"].append(d["file"])
+
+    tags = list(tag_map.values())
+
+    # Sort
+    sort_by = getattr(args, "sort", "count")
+    if sort_by == "name":
+        tags.sort(key=lambda t: t["tag"].lower())
+    else:
+        tags.sort(key=lambda t: (-t["count"], t["tag"].lower()))
+
+    if args.format == "json":
+
+        meta = read_schema_meta(path)
+        output = {
+            "wiki": meta,
+            "total": len(tags),
+            "tags": tags,
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    meta = read_schema_meta(path)
+    print(f"\n🏷️  {meta['name']} — 标签列表")
+    print(f"   共 {len(tags)} 个标签\n")
+
+    if not tags:
+        print("   没有找到标签。")
+        return
+
+    for t in tags:
+        example = ""
+        if t["documents"]:
+            example = t["documents"][0]
+            if len(t["documents"]) > 1:
+                example += f" 等 {len(t['documents'])} 篇"
+        print(f"   {t['tag']:<20}  {t['count']:>3} 次  {example}")
+
+def cmd_stats(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    docs = collect_documents(path)
+    backlinks = build_backlink_map(path)
+
+    # Category breakdown
+    cat_count: dict[str, int] = {}
+    for d in docs:
+        cat_count[d["category"]] = cat_count.get(d["category"], 0) + 1
+
+    # Tag stats
+    tag_count: dict[str, int] = {}
+    total_tags = 0
+    for d in docs:
+        for t in d.get("tags", []):
+            t = t.strip()
+            if t:
+                tag_count[t] = tag_count.get(t, 0) + 1
+                total_tags += 1
+
+    # Link density
+    total_links = sum(d["links_count"] for d in docs)
+    link_density = total_links / len(docs) if docs else 0.0
+
+    # Orphan count
+    orphan_count = 0
+    for d in docs:
+        if d["category"] == "raw":
+            continue
+        stem = Path(d["file"]).stem.lower()
+        if stem in SYSTEM_FILES:
+            continue
+        if stem not in backlinks or len(backlinks[stem]) == 0:
+            orphan_count += 1
+
+    # Total size and latest modification
+    total_size = 0
+    latest_mod = ""
+    for d in docs:
+        total_size += d["size"]
+        if d["modified"] > latest_mod:
+            latest_mod = d["modified"]
+
+    unique_tags = len(tag_count)
+
+    if args.format == "json":
+
+        meta = read_schema_meta(path)
+        cat_breakdown = {}
+        for cat, count in cat_count.items():
+            cat_breakdown[cat] = {
+                "label": CATEGORY_LABELS.get(cat, cat),
+                "count": count,
+            }
+        output = {
+            "wiki": meta,
+            "total_documents": len(docs),
+            "categories": cat_breakdown,
+            "unique_tags": unique_tags,
+            "total_tag_uses": total_tags,
+            "link_density": link_density,
+            "orphan_count": orphan_count,
+            "total_size_bytes": total_size,
+            "latest_modified": latest_mod,
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    meta = read_schema_meta(path)
+    print(f"\n📊 {meta['name']} — 知识库统计")
+    print(f"\n   文档总数: {len(docs)}")
+    for cat in DIRS:
+        count = cat_count.get(cat, 0)
+        if count > 0:
+            print(f"     {CATEGORY_LABELS.get(cat, cat) + '/':<12} {count} 篇")
+
+    print(f"\n   标签统计:")
+    print(f"     唯一标签: {unique_tags}")
+    print(f"     标签使用: {total_tags} 次")
+
+    print(f"\n   链接密度: {link_density:.1f} 条/文档")
+    print(f"   孤立文档: {orphan_count} 篇", end="")
+    if docs:
+        print(f" ({orphan_count * 100 / len(docs):.0f}%)")
+    else:
+        print()
+
+    print(f"   总文件大小: {total_size} 字节", end="")
+    if total_size > 1024 * 1024:
+        print(f" ({total_size / 1024 / 1024:.1f} MB)")
+    elif total_size > 1024:
+        print(f" ({total_size / 1024:.1f} KB)")
+    else:
+        print()
+
+    if latest_mod:
+        print(f"   最近修改: {latest_mod}")
 
 # ── CLI ──
 
@@ -1135,6 +1561,7 @@ def main() -> None:
     p_search.add_argument("path", nargs="?", default=".")
     p_search.add_argument("--format", default="table", choices=["table", "json"])
     p_search.add_argument("--no-raw", action="store_true", dest="no_raw", help="排除原始资料目录")
+    p_search.add_argument("--regex", action="store_true", help="正则表达式搜索")
     p_search.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
 
     p_backlinks = sub.add_parser("backlinks", help="查看页面的反向链接")
@@ -1162,8 +1589,28 @@ def main() -> None:
     p_fix = sub.add_parser("fix", help="结构层自愈检查与修复")
     p_fix.add_argument("path", nargs="?", default=".")
     p_fix.add_argument("--apply", action="store_true", help="执行修复（默认仅预览）")
+    p_fix.add_argument("--interactive", "-i", action="store_true", help="逐条确认修复")
     p_fix.add_argument("--format", default="table", choices=["table", "json"])
     p_fix.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
+
+    p_rename = sub.add_parser("rename", help="重命名文档并全局更新链接")
+    p_rename.add_argument("old_name", help="旧文档名 (如 transformer-architecture)")
+    p_rename.add_argument("new_name", help="新文档名 (如 attention-mechanism)")
+    p_rename.add_argument("path", nargs="?", default=".")
+    p_rename.add_argument("--apply", action="store_true", help="执行重命名（默认仅预览）")
+    p_rename.add_argument("--format", default="table", choices=["table", "json"])
+    p_rename.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
+
+    p_tags = sub.add_parser("tags", help="列出所有标签及使用统计")
+    p_tags.add_argument("path", nargs="?", default=".")
+    p_tags.add_argument("--format", default="table", choices=["table", "json"])
+    p_tags.add_argument("--sort", default="count", choices=["count", "name"], help="排序方式")
+    p_tags.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
+
+    p_stats = sub.add_parser("stats", help="知识库概览统计")
+    p_stats.add_argument("path", nargs="?", default=".")
+    p_stats.add_argument("--format", default="table", choices=["table", "json"])
+    p_stats.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
 
     args = parser.parse_args()
     if args.command is None:
@@ -1194,7 +1641,12 @@ def main() -> None:
         cmd_trace(args)
     elif args.command == "fix":
         cmd_fix(args)
-
+    elif args.command == "rename":
+        cmd_rename(args)
+    elif args.command == "tags":
+        cmd_tags(args)
+    elif args.command == "stats":
+        cmd_stats(args)
 
 if __name__ == "__main__":
     main()

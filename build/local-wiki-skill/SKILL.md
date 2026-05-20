@@ -1,10 +1,10 @@
 ---
 name: wiki
-version: 1.0.5
+version: 1.1.0
 description: 创建、查询和管理本地知识库，纯文件模式，零依赖
 ---
 
-# Local Wiki Skill v1.0.5
+# Local Wiki Skill v1.1.0
 
 Zero-dependency local wiki management for Claude Code. Pure Python, pure files — no Git, no network, just Python 3.9+.
 
@@ -44,6 +44,9 @@ local-wiki-skill/
 | `python scripts/wiki.py trace <page> [path]` | Trace upstream/downstream dependency chain |
 | `python scripts/wiki.py fix [path]` | Auto-fix broken links and normalize naming |
 | `python scripts/wiki.py index [path]` | Generate JSON index for frontend |
+| `python scripts/wiki.py rename <old> <new> [path]` | Rename document and update all wikilinks |
+| `python scripts/wiki.py tags [path]` | List all tags with counts and documents |
+| `python scripts/wiki.py stats [path]` | Knowledge base statistics overview |
 
 ## Quick Check
 
@@ -101,7 +104,7 @@ Output includes: title, file path, category, size, last modified time, tags, wik
 ## /wiki search
 
 ```
-/wiki search <keyword> [path] [--format table|json] [--no-raw] [--pretty]
+/wiki search <keyword> [path] [--format table|json] [--no-raw] [--regex] [--pretty]
 ```
 
 Full-text search across all wiki documents. Case-insensitive substring matching on both titles and body content.
@@ -109,6 +112,7 @@ Full-text search across all wiki documents. Case-insensitive substring matching 
 **Options:**
 - `--format json` — output as JSON (with `--pretty` for indentation)
 - `--no-raw` — exclude `raw/` directory from search results
+- `--regex` — treat keyword as a regular expression pattern
 
 Output includes: document title, file path, matching lines with line numbers.
 
@@ -153,13 +157,38 @@ Run a comprehensive health check on the wiki. Checks for:
 - **Low-link documents** — fewer than 2 outbound `[[wikilinks]]`
 - **Empty documents** — content under 50 bytes (stub/placeholder pages)
 - **Self-referential links** — `[[wikilinks]]` pointing to the document itself
+- **Custom checks** — user-defined external commands from SCHEMA.md
+
+**Configurable weights:** Add a `## 健康检查` section with a YAML block to SCHEMA.md:
+
+```yaml
+weights:
+  orphan: 3
+  broken_link: 5
+  no_tag: 1
+  low_link: 2
+  empty_doc: 2
+  self_link: 1
+```
+
+**Custom external checks:** Add a `## 自定义检查` section with a YAML block:
+
+```yaml
+checks:
+  - name: 链接格式
+    command: "grep -rn '\\[\\[.*\\]\\' --include='*.md' | grep -v 'entities\\|concepts'"
+    description: 检查链接格式是否正确
+    weight: 1
+```
+
+Each custom check runs with a 5-second timeout. stdout lines become issue items.
 
 Output includes a health score (0-100) and actionable suggestions.
 
 ## /wiki fix
 
 ```
-/wiki fix [path] [--apply] [--format table|json] [--pretty]
+/wiki fix [path] [--apply] [--interactive|-i] [--format table|json] [--pretty]
 ```
 
 Structural self-healing: detect and auto-fix broken wikilinks and naming inconsistencies.
@@ -170,6 +199,7 @@ Structural self-healing: detect and auto-fix broken wikilinks and naming inconsi
 
 **Options:**
 - `--apply` — actually apply fixes (default is dry-run preview)
+- `--interactive`, `-i` — confirm each fix individually (y/n/s to skip remaining by type)
 - `--format json` — output as JSON (with `--pretty` for indentation)
 
 Default mode is dry-run: shows what would be fixed without making changes.
@@ -212,6 +242,54 @@ Output (default `queries/index.json`):
   "tags": ["AI", "tech"]
 }
 ```
+
+## /wiki rename
+
+```
+/wiki rename <old-name> <new-name> [path] [--apply] [--format table|json] [--pretty]
+```
+
+Rename a document and globally update all `[[wikilink]]` references pointing to it.
+
+**Actions (in order):**
+1. Update all `[[wikilinks]]` in other documents that reference the old name
+2. Update the `# heading` inside the document itself
+3. Rename the file
+
+**Options:**
+- `--apply` — actually perform the rename (default is dry-run preview)
+- `--format json` — output as JSON (with `--pretty` for indentation)
+
+Default mode is dry-run: shows what would change without making modifications.
+
+## /wiki tags
+
+```
+/wiki tags [path] [--format table|json] [--sort count|name] [--pretty]
+```
+
+List all tags in the wiki with usage counts and associated documents.
+
+**Options:**
+- `--sort count` — sort by usage count, descending (default)
+- `--sort name` — sort alphabetically by tag name
+- `--format json` — output as JSON (with `--pretty` for indentation)
+
+## /wiki stats
+
+```
+/wiki stats [path] [--format table|json] [--pretty]
+```
+
+Knowledge base overview statistics.
+
+**Output includes:**
+- Document count by category
+- Tag statistics (unique tags, total uses)
+- Link density (links per document)
+- Orphan document count and percentage
+- Total file size
+- Latest modification timestamp
 
 ## Conventions
 

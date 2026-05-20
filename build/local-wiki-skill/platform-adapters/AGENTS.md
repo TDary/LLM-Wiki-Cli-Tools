@@ -63,13 +63,16 @@ This is **pure local mode**. There is no Git, no network, no sync. Files are the
 | `python scripts/wiki.py bootstrap <path>` | Bootstrap wiki at a given path |
 | `python scripts/wiki.py install <project>` | Install skill into a project |
 | `python scripts/wiki.py list [path] [--format json] [--category CAT] [--tags TAG1,TAG2] [--include-raw]` | List all documents (raw/ excluded by default) |
-| `python scripts/wiki.py search <keyword> [path] [--format json] [--no-raw]` | Full-text search across documents |
+| `python scripts/wiki.py search <keyword> [path] [--format json] [--no-raw] [--regex]` | Full-text search across documents |
 | `python scripts/wiki.py backlinks <page> [path] [--format json]` | Find all pages linking to a target |
 | `python scripts/wiki.py orphans [path] [--format json]` | Detect orphan documents with no inbound links |
-| `python scripts/wiki.py health [path] [--format json]` | Full health check (orphans, broken links, tags, links, empty docs, self-links) |
+| `python scripts/wiki.py health [path] [--format json]` | Full health check (configurable weights + custom checks) |
 | `python scripts/wiki.py trace <page> [path] [--format json]` | Trace upstream/downstream dependency chain |
-| `python scripts/wiki.py fix [path] [--apply] [--format json]` | Auto-fix broken links and normalize naming (dry-run by default) |
+| `python scripts/wiki.py fix [path] [--apply] [--interactive] [--format json]` | Auto-fix broken links and normalize naming |
 | `python scripts/wiki.py index [path] [--output FILE]` | Generate structured JSON index for frontend |
+| `python scripts/wiki.py rename <old> <new> [path] [--apply]` | Rename document and update all wikilinks |
+| `python scripts/wiki.py tags [path] [--sort count\|name]` | List all tags with counts |
+| `python scripts/wiki.py stats [path]` | Knowledge base statistics overview |
 
 ## Wiki Structure
 
