@@ -279,6 +279,8 @@ wiki-tools stats [WIKI_PATH] [--format table|json] [--pretty]
 
 ## 编译
 
+### Bash / Zsh
+
 ```bash
 # 当前平台（完整版，含 Git 支持）
 go build -o wiki-tools .
@@ -292,6 +294,23 @@ GOOS=linux   GOARCH=amd64 go build -o dist/wiki-tools-linux-amd64 .
 GOOS=linux   GOARCH=arm64 go build -o dist/wiki-tools-linux-arm64 .
 GOOS=darwin  GOARCH=amd64 go build -o dist/wiki-tools-darwin-amd64 .
 GOOS=darwin  GOARCH=arm64 go build -o dist/wiki-tools-darwin-arm64 .
+```
+
+### PowerShell
+
+```powershell
+# 当前平台
+go build -o wiki-tools.exe .
+
+# 全平台交叉编译
+$env:GOOS="windows"; $env:GOARCH="amd64"; go build -o dist/wiki-tools-windows-amd64.exe .
+$env:GOOS="linux";   $env:GOARCH="amd64"; go build -o dist/wiki-tools-linux-amd64 .
+$env:GOOS="linux";   $env:GOARCH="arm64"; go build -o dist/wiki-tools-linux-arm64 .
+$env:GOOS="darwin";  $env:GOARCH="amd64"; go build -o dist/wiki-tools-darwin-amd64 .
+$env:GOOS="darwin";  $env:GOARCH="arm64"; go build -o dist/wiki-tools-darwin-arm64 .
+
+# 清除环境变量
+Remove-Item Env:GOOS, Env:GOARCH
 ```
 
 ---
