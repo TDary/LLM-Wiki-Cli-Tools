@@ -148,10 +148,12 @@ func runSync(p syncParams) error {
 		if err != nil {
 			return fmt.Errorf("git-auto-sync: cannot determine current branch: %w", err)
 		}
-	}
-	currentBranch, _ := git.CurrentBranch(p.repoPath)
-	if branch != currentBranch && currentBranch != "" {
-		return fmt.Errorf("git-auto-sync: current branch (%s) != target branch (%s), switch branch first", currentBranch, branch)
+	} else {
+		// Verify current branch matches target
+		currentBranch, _ := git.CurrentBranch(p.repoPath)
+		if currentBranch != "" && branch != currentBranch {
+			return fmt.Errorf("git-auto-sync: current branch (%s) != target branch (%s), switch branch first", currentBranch, branch)
+		}
 	}
 
 	if p.rebase {

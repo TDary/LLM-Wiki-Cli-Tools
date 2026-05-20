@@ -89,8 +89,21 @@ func healthCmd(args []string) {
 		Target      string `json:"target"`
 		Line        int    `json:"line"`
 	}
+	type SelfLink struct {
+		File  string `json:"file"`
+		Title string `json:"title"`
+		Line  int    `json:"line"`
+		Link  string `json:"link"`
+	}
 	var brokenLinks []BrokenLink
+	var selfLinks []SelfLink
+
+	// Single pass: detect broken links and self-links with one line split per doc
 	for _, d := range userDocs {
+		selfStem := strings.ToLower(strings.TrimSuffix(filepath.Base(d.File), ".md"))
+		lines := strings.Split(d.Text, "\n")
+
+		// Broken links
 		matches := healthWikilinkRe.FindAllStringSubmatch(d.Text, -1)
 		for _, m := range matches {
 			if len(m) < 2 {
@@ -98,7 +111,7 @@ func healthCmd(args []string) {
 			}
 			target := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(m[1]), " ", "-"))
 			if !existingStems[target] {
-				for lineNo, line := range strings.Split(d.Text, "\n") {
+				for lineNo, line := range lines {
 					if strings.Contains(line, "[["+m[1]+"]]") {
 						brokenLinks = append(brokenLinks, BrokenLink{
 							SourceFile:  d.File,
@@ -108,6 +121,25 @@ func healthCmd(args []string) {
 						})
 						break
 					}
+				}
+			}
+		}
+
+		// Self-links
+		for lineNo, line := range lines {
+			lineMatches := healthWikilinkRe.FindAllStringSubmatch(line, -1)
+			for _, m := range lineMatches {
+				if len(m) < 2 {
+					continue
+				}
+				target := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(m[1]), " ", "-"))
+				if target == selfStem {
+					selfLinks = append(selfLinks, SelfLink{
+						File:  d.File,
+						Title: d.Title,
+						Line:  lineNo + 1,
+						Link:  m[1],
+					})
 				}
 			}
 		}
@@ -131,34 +163,6 @@ func healthCmd(args []string) {
 	for _, d := range userDocs {
 		if len(strings.TrimSpace(d.Text)) < 50 {
 			emptyDocs = append(emptyDocs, d)
-		}
-	}
-
-	type SelfLink struct {
-		File  string `json:"file"`
-		Title string `json:"title"`
-		Line  int    `json:"line"`
-		Link  string `json:"link"`
-	}
-	var selfLinks []SelfLink
-	for _, d := range userDocs {
-		selfStem := strings.ToLower(strings.TrimSuffix(filepath.Base(d.File), ".md"))
-		for lineNo, line := range strings.Split(d.Text, "\n") {
-			matches := healthWikilinkRe.FindAllStringSubmatch(line, -1)
-			for _, m := range matches {
-				if len(m) < 2 {
-					continue
-				}
-				target := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(m[1]), " ", "-"))
-				if target == selfStem {
-					selfLinks = append(selfLinks, SelfLink{
-						File:  d.File,
-						Title: d.Title,
-						Line:  lineNo + 1,
-						Link:  m[1],
-					})
-				}
-			}
 		}
 	}
 
@@ -236,8 +240,9 @@ func healthCmd(args []string) {
 		score = 100
 	}
 
+	meta := wiki.ReadSchemaMeta(p)
+
 	if format == "json" {
-		meta := wiki.ReadSchemaMeta(p)
 		output := map[string]interface{}{
 			"wiki":            meta,
 			"score":           score,
@@ -270,7 +275,6 @@ func healthCmd(args []string) {
 		return "❌"
 	}
 
-	meta := wiki.ReadSchemaMeta(p)
 	fmt.Printf("\n🏥 %s — 知识库健康报告\n", meta.Name)
 	fmt.Printf("   文档总数: %d\n\n", len(userDocs))
 	fmt.Printf("   %s 孤立文档:     %d 篇 (权重 %d)\n", statusIcon(len(orphans), 5), len(orphans), w["orphan"])

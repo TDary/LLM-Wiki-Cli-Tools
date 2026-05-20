@@ -95,8 +95,9 @@ func listCmd(args []string) {
 		docs = filtered
 	}
 
+	meta := wiki.ReadSchemaMeta(p)
+
 	if format == "json" {
-		meta := wiki.ReadSchemaMeta(p)
 		output := map[string]interface{}{
 			"wiki":      meta,
 			"total":     len(docs),
@@ -110,7 +111,6 @@ func listCmd(args []string) {
 		return
 	}
 
-	meta := wiki.ReadSchemaMeta(p)
 	fmt.Printf("\n📚 %s — %s\n", meta.Name, meta.Domain)
 	fmt.Printf("   共 %d 篇文档\n\n", len(docs))
 

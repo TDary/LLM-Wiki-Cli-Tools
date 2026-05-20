@@ -93,8 +93,9 @@ func tagsCmd(args []string) {
 		})
 	}
 
+	meta := wiki.ReadSchemaMeta(p)
+
 	if format == "json" {
-		meta := wiki.ReadSchemaMeta(p)
 		output := map[string]interface{}{
 			"wiki":    meta,
 			"total":   len(tags),
@@ -108,7 +109,6 @@ func tagsCmd(args []string) {
 		return
 	}
 
-	meta := wiki.ReadSchemaMeta(p)
 	fmt.Printf("\n🏷️  %s — 标签列表\n", meta.Name)
 	fmt.Printf("   共 %d 个标签\n\n", len(tags))
 

@@ -69,9 +69,16 @@ func fixCmd(args []string) {
 		existingStems[stem] = true
 	}
 
+	// Build candidates once for FindClosest
+	candidates := make([]string, 0, len(existingStems))
+	for s := range existingStems {
+		candidates = append(candidates, s)
+	}
+
 	var fixes []Fix
 	seen := make(map[string]bool)
 
+	// Single pass: detect both broken links and normalization issues
 	for _, d := range docs {
 		if d.Category == "raw" {
 			continue
@@ -83,59 +90,44 @@ func fixCmd(args []string) {
 			}
 			original := m[1]
 			targetStem := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(original), " ", "-"))
+
+			// Broken link
 			if !existingStems[targetStem] {
 				key := "broken:" + d.File + ":" + original
-				if seen[key] {
-					continue
+				if !seen[key] {
+					seen[key] = true
+					closest, _ := wiki.FindClosest(targetStem, candidates)
+					action := fmt.Sprintf("[[%s]] → (删除或创建目标页面)", original)
+					if closest != "" {
+						info := graph.DocInfo[closest]
+						action = fmt.Sprintf("[[%s]] → [[%s]]", original, info.Title)
+					}
+					fixes = append(fixes, Fix{
+						Type:       "broken_link",
+						File:       d.File,
+						Original:   original,
+						TargetStem: targetStem,
+						Suggestion: closest,
+						Action:     action,
+					})
 				}
-				seen[key] = true
-				candidates := make([]string, 0, len(existingStems))
-				for s := range existingStems {
-					candidates = append(candidates, s)
-				}
-				closest, _ := wiki.FindClosest(targetStem, candidates)
-				action := fmt.Sprintf("[[%s]] → (删除或创建目标页面)", original)
-				if closest != "" {
-					info := graph.DocInfo[closest]
-					action = fmt.Sprintf("[[%s]] → [[%s]]", original, info.Title)
-				}
-				fixes = append(fixes, Fix{
-					Type:       "broken_link",
-					File:       d.File,
-					Original:   original,
-					TargetStem: targetStem,
-					Suggestion: closest,
-					Action:     action,
-				})
 			}
-		}
-	}
 
-	for _, d := range docs {
-		if d.Category == "raw" {
-			continue
-		}
-		matches := fixWikilinkRe.FindAllStringSubmatch(d.Text, -1)
-		for _, m := range matches {
-			if len(m) < 2 {
-				continue
-			}
-			original := m[1]
+			// Naming normalization
 			if strings.Contains(original, "_") {
 				normalized := strings.ReplaceAll(original, "_", "-")
 				key := "norm:" + d.File + ":" + original
-				if seen[key] {
-					continue
+				if !seen[key] {
+					seen[key] = true
+					fixes = append(fixes, Fix{
+						Type:       "normalize",
+						File:       d.File,
+						Original:   original,
+						TargetStem: strings.ToLower(strings.ReplaceAll(normalized, " ", "-")),
+						Suggestion: normalized,
+						Action:     fmt.Sprintf("[[%s]] → [[%s]]", original, normalized),
+					})
 				}
-				seen[key] = true
-				fixes = append(fixes, Fix{
-					Type:       "normalize",
-					File:       d.File,
-					Original:   original,
-					TargetStem: strings.ToLower(strings.ReplaceAll(normalized, " ", "-")),
-					Suggestion: normalized,
-					Action:     fmt.Sprintf("[[%s]] → [[%s]]", original, normalized),
-				})
 			}
 		}
 	}
@@ -188,6 +180,22 @@ func fixCmd(args []string) {
 	appliedCount := 0
 	skippedCount := 0
 
+	// File content cache — read once per file, write once at end
+	fileCache := make(map[string]string)
+	fileDirty := make(map[string]bool)
+
+	readFile := func(fp string) (string, bool) {
+		if content, ok := fileCache[fp]; ok {
+			return content, true
+		}
+		data, err := os.ReadFile(fp)
+		if err != nil {
+			return "", false
+		}
+		fileCache[fp] = string(data)
+		return fileCache[fp], true
+	}
+
 	if len(broken) > 0 {
 		fmt.Printf("   ── 断链修复 (%d 处) ──\n", len(broken))
 		for _, f := range broken {
@@ -212,24 +220,22 @@ func fixCmd(args []string) {
 						fmt.Printf("   ⏭️  已跳过\n")
 						continue
 					}
-					// "y" or empty or anything else -> proceed
 				}
 
-				fp := filepath.Join(p, f.File)
-				data, err := os.ReadFile(fp)
-				if err != nil {
+				if f.Suggestion == "" {
+					fmt.Printf("   ⏭️  %s: %s (需手动处理)\n", f.File, f.Action)
 					continue
 				}
-				text := string(data)
-				if f.Suggestion != "" {
-					info := graph.DocInfo[f.Suggestion]
-					newText := strings.ReplaceAll(text, "[["+f.Original+"]]", "[["+info.Title+"]]")
-					os.WriteFile(fp, []byte(newText), 0644)
-					fmt.Printf("   ✅ %s: %s\n", f.File, f.Action)
-					appliedCount++
-				} else {
-					fmt.Printf("   ⏭️  %s: %s (需手动处理)\n", f.File, f.Action)
+				fp := filepath.Join(p, f.File)
+				content, ok := readFile(fp)
+				if !ok {
+					continue
 				}
+				info := graph.DocInfo[f.Suggestion]
+				fileCache[fp] = strings.ReplaceAll(content, "[["+f.Original+"]]", "[["+info.Title+"]]")
+				fileDirty[fp] = true
+				fmt.Printf("   ✅ %s: %s\n", f.File, f.Action)
+				appliedCount++
 			} else {
 				status := "✅ 可修复"
 				if f.Suggestion == "" {
@@ -264,13 +270,12 @@ func fixCmd(args []string) {
 				}
 
 				fp := filepath.Join(p, f.File)
-				data, err := os.ReadFile(fp)
-				if err != nil {
+				content, ok := readFile(fp)
+				if !ok {
 					continue
 				}
-				text := string(data)
-				newText := strings.ReplaceAll(text, "[["+f.Original+"]]", "[["+f.Suggestion+"]]")
-				os.WriteFile(fp, []byte(newText), 0644)
+				fileCache[fp] = strings.ReplaceAll(content, "[["+f.Original+"]]", "[["+f.Suggestion+"]]")
+				fileDirty[fp] = true
 				fmt.Printf("   ✅ %s: %s\n", f.File, f.Action)
 				appliedCount++
 			} else {
@@ -278,6 +283,11 @@ func fixCmd(args []string) {
 			}
 		}
 		fmt.Println()
+	}
+
+	// Write all modified files once
+	for fp := range fileDirty {
+		os.WriteFile(fp, []byte(fileCache[fp]), 0644)
 	}
 
 	if !apply {

@@ -103,8 +103,9 @@ func statsCmd(args []string) {
 	// Unique tags
 	uniqueTags := len(tagCount)
 
+	meta := wiki.ReadSchemaMeta(p)
+
 	if format == "json" {
-		meta := wiki.ReadSchemaMeta(p)
 		catBreakdown := make(map[string]interface{})
 		for cat, count := range catCount {
 			catBreakdown[cat] = map[string]interface{}{
@@ -131,7 +132,6 @@ func statsCmd(args []string) {
 		return
 	}
 
-	meta := wiki.ReadSchemaMeta(p)
 	fmt.Printf("\n📊 %s — 知识库统计\n", meta.Name)
 	fmt.Printf("\n   文档总数: %d\n", len(docs))
 	for _, cat := range wiki.Dirs {
