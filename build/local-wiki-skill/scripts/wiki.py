@@ -1612,6 +1612,23 @@ def main() -> None:
     p_stats.add_argument("--format", default="table", choices=["table", "json"])
     p_stats.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
 
+    p_wps_auth = sub.add_parser("wps-auth", help="WPS OAuth 授权（首次使用）")
+
+    p_import = sub.add_parser("import", help="批量导入 WPS 云文档到知识库")
+    p_import.add_argument("path", nargs="?", default=".")
+    p_import.add_argument("--wps-folder", default="", help="WPS 文件夹 URL")
+    p_import.add_argument("--wps-file", default="", help="单个 WPS 文件 URL")
+    p_import.add_argument("--manifest", default="", help="JSON 清单文件路径")
+    p_import.add_argument("--stdin", action="store_true", help="从 stdin 读取 JSON")
+    p_import.add_argument("--category", default="", help="强制指定分类")
+    p_import.add_argument("--tags", default="", help="附加标签（逗号分隔）")
+    p_import.add_argument("--dry-run", action="store_true", help="预览模式")
+    p_import.add_argument("--force", action="store_true", help="跳过确认直接导入")
+    p_import.add_argument("--yes", "-y", action="store_true", help="跳过确认直接导入")
+    p_import.add_argument("--skip-existing", action="store_true", help="跳过已导入文件")
+    p_import.add_argument("--format", default="table", choices=["table", "json"])
+    p_import.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -1647,6 +1664,14 @@ def main() -> None:
         cmd_tags(args)
     elif args.command == "stats":
         cmd_stats(args)
+    elif args.command == "wps-auth":
+        from wiki_import import wps_do_auth
+        wps_do_auth()
+    elif args.command == "import":
+        p = expand(args.path or ".")
+        require_wiki(p)
+        from wiki_import import cmd_import
+        cmd_import(args, p)
 
 if __name__ == "__main__":
     main()

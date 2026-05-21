@@ -1,10 +1,10 @@
 ---
 name: wiki
-version: 1.1.0
+version: 1.1.1
 description: 创建、查询和管理本地知识库，纯文件模式，零依赖
 ---
 
-# Local Wiki Skill v1.1.0
+# Local Wiki Skill v1.1.1
 
 Zero-dependency local wiki management for Claude Code. Pure Python, pure files — no Git, no network, just Python 3.9+.
 
@@ -47,6 +47,8 @@ local-wiki-skill/
 | `python scripts/wiki.py rename <old> <new> [path]` | Rename document and update all wikilinks |
 | `python scripts/wiki.py tags [path]` | List all tags with counts and documents |
 | `python scripts/wiki.py stats [path]` | Knowledge base statistics overview |
+| `python scripts/wiki.py wps-auth` | WPS OAuth authorization (first-time setup) |
+| `python scripts/wiki.py import [path]` | Batch import WPS cloud documents |
 
 ## Quick Check
 
@@ -290,6 +292,104 @@ Knowledge base overview statistics.
 - Orphan document count and percentage
 - Total file size
 - Latest modification timestamp
+
+## /wiki wps-auth
+
+```
+/wiki wps-auth
+```
+
+One-time WPS OAuth authorization. Opens a browser for the user to authorize the app, then saves the token locally for subsequent API calls.
+
+**Prerequisites:**
+Create `scripts/wps_config.json` with your WPS Open Platform app credentials:
+
+```json
+{
+  "app_id": "your_app_id",
+  "app_secret": "your_app_secret",
+  "redirect_uri": "http://localhost:8899/callback"
+}
+```
+
+**How it works:**
+1. Reads app credentials from `wps_config.json`
+2. Opens browser to WPS authorization page
+3. Starts a local HTTP server to receive the callback
+4. Exchanges the authorization code for an access token
+5. Saves token to `wps_token.json` (auto-refreshes when expired)
+
+## /wiki import
+
+```
+/wiki import [path] [--wps-folder URL] [--wps-file URL] [--manifest FILE] [--stdin] [OPTIONS]
+```
+
+Batch import WPS cloud documents into the wiki. Supports three input sources:
+
+**Input sources (pick one):**
+- `--wps-folder <url>` — Import all files from a WPS folder (auto-traverses subfolders)
+- `--wps-file <url>` — Import a single WPS cloud document
+- `--manifest <file>` — Import from a JSON manifest file
+- `--stdin` — Read JSON manifest from stdin
+
+**Options:**
+- `--category CAT` — Force classification (overrides auto-classification)
+- `--tags TAG1,TAG2` — Additional tags
+- `--dry-run` — Preview mode (no files written)
+- `--force` / `-y` — Skip confirmation, import directly
+- `--skip-existing` — Skip files already imported (tracked by wps_file_id in SCHEMA.md)
+- `--format table|json` — Output format
+- `--pretty` — JSON indentation
+
+**Import flow:**
+1. Parse input source (folder URL / file URL / JSON manifest)
+2. For folders: traverse all files, show scope summary (file count, type breakdown)
+3. Wait for user confirmation (unless `--force` or `-y`)
+4. For each file:
+   - Skip if already indexed (`--skip-existing`)
+   - Extract content via WPS API (`markdown` format)
+   - Auto-classify: `raw/` (default), `entities/`, `concepts/`, `relations/`
+   - Auto-generate tags from title and path keywords
+   - Generate normalized filename (lowercase, hyphens)
+   - Write wiki page with frontmatter (title, tags, source URL, wps_file_id)
+5. Update SCHEMA.md `## 已索引文件` section for incremental tracking
+6. Append import log to `log.md`
+
+**Auto-classification rules:**
+
+| Title/Path keywords | Category |
+|---------------------|----------|
+| 会议, 周报, 日报, 纪要 | `raw/` |
+| 团队, 人员, 成员 | `entities/` |
+| 概念, 方案, 设计, spec, 架构 | `concepts/` |
+| Other | `raw/` (default) |
+
+**JSON manifest format:**
+
+```json
+{
+  "documents": [
+    {
+      "id": "wps_file_id",
+      "title": "Document Title",
+      "content": "Full text content (markdown)",
+      "url": "https://www.kdocs.cn/xxx",
+      "author": "Author Name",
+      "date": "2025-01-15",
+      "type": "doc|sheet|ppt|pdf",
+      "tags": ["AI", "design"],
+      "category": "",
+      "path_hint": "/Team Docs/AI Project/"
+    }
+  ]
+}
+```
+
+Only `id` and `title` are required. `content` can be empty (creates a stub page).
+
+**Incremental updates:**
+Imported files are tracked in SCHEMA.md under `## 已索引文件` with their `wps_file_id`. Use `--skip-existing` to only import new files on subsequent runs.
 
 ## Conventions
 
