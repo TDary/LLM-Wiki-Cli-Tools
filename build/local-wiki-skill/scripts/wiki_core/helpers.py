@@ -68,6 +68,22 @@ def extract_frontmatter_from_text(text: str) -> dict:
     return fm
 
 
+def _lazy_load_text(doc: dict, wiki_path: Path | None = None) -> str:
+    """Load _text from disk on demand (for index-loaded docs). Caches in doc dict."""
+    if wiki_path:
+        fp = wiki_path / doc["file"]
+    else:
+        fp = Path(doc.get("absolute_path", ""))
+    text = ""
+    if fp.exists():
+        try:
+            text = fp.read_text(encoding="utf-8")
+        except Exception:
+            pass
+    doc["_text"] = text
+    return text
+
+
 def build_backlink_map(wiki_path: Path, docs: list[dict] | None = None) -> dict[str, list[dict]]:
     """Build a map of {target_file: [source_doc_info, ...]} from all wikilinks."""
     if docs is None:
@@ -76,7 +92,9 @@ def build_backlink_map(wiki_path: Path, docs: list[dict] | None = None) -> dict[
     for doc in docs:
         rel_file = doc["file"]
         title = doc["title"]
-        text = doc.get("_text", "")
+        text = doc.get("_text")
+        if text is None:
+            text = _lazy_load_text(doc, wiki_path)
         if not text:
             continue
         text_lines = text.splitlines()
@@ -114,7 +132,9 @@ def search_documents(docs: list[dict], keyword: str, regex: bool = False) -> lis
         matches_in_file = []
         if matcher(doc["title"]):
             matches_in_file.append({"line": 0, "content": doc["title"]})
-        text = doc.get("_text", "")
+        text = doc.get("_text")
+        if text is None:
+            text = _lazy_load_text(doc)
         if not text:
             try:
                 text = Path(doc["absolute_path"]).read_text(encoding="utf-8")
@@ -163,11 +183,44 @@ def collect_documents(wiki_path: Path) -> list[dict]:
 _doc_cache: dict[str, list[dict]] = {}
 
 
+def _load_docs_from_index(wiki_path: Path) -> list[dict] | None:
+    """Try to load document metadata from persisted index for fast startup."""
+    index_path = wiki_path / "queries" / "index.json"
+    if not index_path.exists():
+        return None
+    try:
+        idx = json.loads(index_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    inverted = idx.get("inverted_index")
+    if not inverted:
+        return None
+
+    # Freshness: index mtime >= stored latest_modified
+    index_mtime = index_path.stat().st_mtime
+    latest_str = idx.get("latest_modified", "")
+    if latest_str:
+        latest_ts = datetime.strptime(latest_str, "%Y-%m-%d %H:%M:%S").timestamp()
+        if index_mtime < latest_ts:
+            return None
+
+    docs = []
+    for cat in idx.get("categories", []):
+        for entry in cat.get("documents", []):
+            d = dict(entry)
+            d["category_label"] = CATEGORY_LABELS.get(d.get("category", ""), d.get("category", ""))
+            d["absolute_path"] = str((wiki_path / d["file"]).resolve()).replace("\\", "/")
+            d["_text"] = None  # lazy: loaded on first access
+            docs.append(d)
+    return docs
+
+
 def collect_documents_cached(wiki_path: Path) -> list[dict]:
-    """Return cached collect_documents result for the given path."""
+    """Return cached document list. Uses persisted index for fast cross-session startup."""
     key = str(wiki_path)
     if key not in _doc_cache:
-        _doc_cache[key] = collect_documents(wiki_path)
+        docs = _load_docs_from_index(wiki_path)
+        _doc_cache[key] = docs if docs is not None else collect_documents(wiki_path)
     return _doc_cache[key]
 
 
@@ -308,7 +361,9 @@ def build_link_graph(wiki_path: Path, docs: list[dict] | None = None) -> tuple[d
 
     for doc in docs:
         stem = Path(doc["file"]).stem.lower()
-        text = doc.get("_text", "")
+        text = doc.get("_text")
+        if text is None:
+            text = _lazy_load_text(doc, wiki_path)
         doc_info[stem] = {"title": doc["title"], "file": doc["file"], "category": doc["category"]}
 
         targets = []

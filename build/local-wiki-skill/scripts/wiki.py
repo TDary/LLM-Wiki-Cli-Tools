@@ -63,6 +63,7 @@ def main() -> None:
     p_search.add_argument("--format", default="table", choices=["table", "json"])
     p_search.add_argument("--no-raw", action="store_true", dest="no_raw", help="排除原始资料目录")
     p_search.add_argument("--regex", action="store_true", help="正则表达式搜索")
+    p_search.add_argument("--use-index", action="store_true", dest="use_index", help="使用倒排索引加速搜索 (需先运行 index)")
     p_search.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
 
     p_backlinks = sub.add_parser("backlinks", help="查看页面的反向链接")

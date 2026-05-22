@@ -14,12 +14,19 @@ from .helpers import (
     build_backlink_map, build_link_graph, trace_graph, find_closest,
     read_health_config, read_custom_checks, _strip_internal,
     extract_frontmatter_from_text, _extract_yaml_block, _parse_yaml_kv_pairs,
-    append_to_log,
+    append_to_log, _lazy_load_text,
 )
 
 
 REQUIRED_FRONTMATTER = {"title", "created", "updated", "type", "tags", "sources"}
 VALID_TYPES = {"entity", "concept", "comparison", "query", "summary"}
+
+
+def _ensure_text(docs: list[dict], wiki_path: Path) -> None:
+    """Load _text for any docs that have None (from index-based cache)."""
+    for d in docs:
+        if d.get("_text") is None:
+            _lazy_load_text(d, wiki_path)
 
 
 def _read_tag_taxonomy(wiki_path: Path) -> set[str]:
@@ -38,6 +45,7 @@ def cmd_orphans(args: argparse.Namespace) -> None:
     require_wiki(path)
 
     docs = collect_documents_cached(path)
+    _ensure_text(docs, path)
     backlinks = build_backlink_map(path, docs)
 
     orphans = []
@@ -82,6 +90,7 @@ def cmd_health(args: argparse.Namespace) -> None:
     require_wiki(path)
 
     docs = collect_documents_cached(path)
+    _ensure_text(docs, path)
     backlinks = build_backlink_map(path, docs)
     weights = read_health_config(path)
 
@@ -558,6 +567,7 @@ def cmd_trace(args: argparse.Namespace) -> None:
     target_stem = page.strip().lower().replace(" ", "-")
 
     docs = collect_documents_cached(path)
+    _ensure_text(docs, path)
     outbound, doc_info = build_link_graph(path, docs)
 
     inbound: dict[str, list[str]] = {}
@@ -640,6 +650,7 @@ def cmd_fix(args: argparse.Namespace) -> None:
     require_wiki(path)
 
     docs = collect_documents_cached(path)
+    _ensure_text(docs, path)
     outbound, doc_info = build_link_graph(path, docs)
     existing_stems = {k for k, v in doc_info.items() if v["category"] != "raw"}
 
@@ -836,6 +847,7 @@ def cmd_rename(args: argparse.Namespace) -> None:
     new_title = new_name.strip().replace("-", " ").title()
 
     docs = collect_documents_cached(path)
+    _ensure_text(docs, path)
     source_doc = None
     for d in docs:
         stem = Path(d["file"]).stem.lower()
@@ -944,6 +956,7 @@ def cmd_archive(args: argparse.Namespace) -> None:
 
     # Find the source document
     docs = collect_documents_cached(path)
+    _ensure_text(docs, path)
     source_doc = None
     for d in docs:
         if Path(d["file"]).stem.lower() == target_stem:

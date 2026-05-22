@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from . import DIRS, CATEGORY_LABELS, SYSTEM_FILES
 from .helpers import (
     expand, require_wiki, now, collect_documents, collect_documents_cached, read_schema_meta,
     search_documents, build_backlink_map, _strip_internal,
+    extract_frontmatter_from_text, extract_title, _lazy_load_text,
 )
 
 
@@ -80,12 +82,29 @@ def cmd_index(args: argparse.Namespace) -> None:
         for t in d.get("tags", []):
             all_tags.add(t)
 
+    # Build inverted index for search acceleration
+    inverted: dict[str, list[dict]] = {}
+    for d in docs:
+        text = d.get("_text")
+        if text is None:
+            text = _lazy_load_text(d, path)
+        for line_no, line in enumerate(text.splitlines(), 1):
+            words = set(re.findall(r"\w{2,}", line.lower()))
+            for w in words:
+                if w not in inverted:
+                    inverted[w] = []
+                inverted[w].append({"file": d["file"], "line": line_no})
+
+    latest_modified = max((d["modified"] for d in docs), default="")
+
     index = {
         "wiki": meta,
         "generated_at": now(),
         "total_documents": len(docs),
+        "latest_modified": latest_modified,
         "categories": [by_category[k] for k in DIRS if k in by_category],
         "tags": sorted(all_tags),
+        "inverted_index": inverted,
     }
 
     output_path = expand(args.output or str(path / "queries" / "index.json"))
@@ -98,6 +117,82 @@ def cmd_index(args: argparse.Namespace) -> None:
     print(f"   文档总数: {len(docs)}")
     print(f"   分类数: {len(by_category)}")
     print(f"   标签: {', '.join(sorted(all_tags)) if all_tags else '无'}")
+    print(f"   倒排索引: {len(inverted)} 词 → {sum(len(v) for v in inverted.values())} 条目")
+    print(f"\n   💡 使用 search --use-index 可加速搜索")
+
+
+def _try_index_search(path: Path, keyword: str, docs: list[dict], no_raw: bool = False) -> list[dict] | None:
+    """Try inverted-index search. Returns results or None if index unavailable/stale."""
+    index_path = path / "queries" / "index.json"
+    if not index_path.exists():
+        return None
+
+    try:
+        idx = json.loads(index_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    inv = idx.get("inverted_index")
+    if not inv:
+        return None
+
+    # Freshness: index mtime must be >= latest doc mtime
+    index_mtime = os.path.getmtime(index_path)
+    latest_mod = max(
+        (datetime.strptime(d["modified"], "%Y-%m-%d %H:%M:%S").timestamp() for d in docs),
+        default=0,
+    )
+    if index_mtime < latest_mod:
+        return None
+
+    kw_lower = keyword.lower()
+    entries = inv.get(kw_lower, [])
+    if not entries:
+        return []
+
+    if no_raw:
+        raw_prefixes = ("raw/", "raw\\")
+        entries = [e for e in entries if not e["file"].startswith(raw_prefixes)]
+
+    # Group entries by file, dedup line numbers
+    by_file: dict[str, set[int]] = {}
+    for e in entries:
+        by_file.setdefault(e["file"], set()).add(e["line"])
+
+    results = []
+    for filepath, target_lines in by_file.items():
+        fp = path / filepath
+        if not fp.exists():
+            continue
+        try:
+            text = fp.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        lines = text.splitlines()
+        fm = extract_frontmatter_from_text(text)
+        title = fm.get("title") or extract_title(fp)
+        tags = fm.get("tags", [])
+
+        matches = []
+        for line_no in sorted(target_lines):
+            if 1 <= line_no <= len(lines):
+                content = lines[line_no - 1].strip()
+                if kw_lower in content.lower():
+                    matches.append({"line": line_no, "content": content})
+
+        if matches:
+            results.append({
+                "title": title,
+                "file": filepath,
+                "absolute_path": str(fp.resolve()).replace("\\", "/"),
+                "category": filepath.split("/")[0] if "/" in filepath else filepath.split("\\")[0],
+                "tags": tags,
+                "matches": matches,
+                "match_count": len(matches),
+            })
+
+    return results
 
 
 def cmd_search(args: argparse.Namespace) -> None:
@@ -109,10 +204,18 @@ def cmd_search(args: argparse.Namespace) -> None:
     if getattr(args, "no_raw", False):
         docs = [d for d in docs if d["category"] != "raw"]
 
-    if getattr(args, "regex", False):
-        results = search_documents(docs, args.keyword, regex=True)
-    else:
-        results = search_documents(docs, args.keyword)
+    # Try inverted index first (non-regex only)
+    use_index = getattr(args, "use_index", False)
+    results = None
+    if use_index and not getattr(args, "regex", False):
+        results = _try_index_search(path, args.keyword, docs, getattr(args, "no_raw", False))
+
+    # Fallback: full scan
+    if results is None:
+        if getattr(args, "regex", False):
+            results = search_documents(docs, args.keyword, regex=True)
+        else:
+            results = search_documents(docs, args.keyword)
 
     if args.format == "json":
         meta = read_schema_meta(path)

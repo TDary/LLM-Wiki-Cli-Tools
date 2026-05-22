@@ -1,10 +1,10 @@
 ---
 name: wiki
-version: 1.2.1
+version: 1.3.0
 description: 创建、查询和管理本地知识库，纯文件模式，零依赖
 ---
 
-# Local Wiki Skill v1.2.1
+# Local Wiki Skill v1.3.0
 
 Zero-dependency local wiki management for Claude Code. Pure Python, pure files — no Git, no network, just Python 3.9+.
 
@@ -64,7 +64,7 @@ local-wiki-skill/
 | `python scripts/wiki.py sync [path]` | Confirm local-only status |
 | `python scripts/wiki.py bootstrap <path>` | Bootstrap at a given path |
 | `python scripts/wiki.py list [path]` | List all documents (table or JSON) |
-| `python scripts/wiki.py search <keyword> [path]` | Full-text search across documents |
+| `python scripts/wiki.py search <keyword> [path]` | Full-text search across documents (`--use-index` for inverted index acceleration) |
 | `python scripts/wiki.py backlinks <page> [path]` | Find all pages linking to a target |
 | `python scripts/wiki.py orphans [path]` | Detect orphan documents with no inbound links |
 | `python scripts/wiki.py health [path]` | Run full health check on wiki |
@@ -133,7 +133,7 @@ Output includes: title, file path, category, size, last modified time, tags, wik
 ## /wiki search
 
 ```
-/wiki search <keyword> [path] [--format table|json] [--no-raw] [--regex] [--pretty]
+/wiki search <keyword> [path] [--format table|json] [--no-raw] [--regex] [--use-index] [--pretty]
 ```
 
 Full-text search across all wiki documents. Case-insensitive substring matching on both titles and body content.
@@ -142,6 +142,7 @@ Full-text search across all wiki documents. Case-insensitive substring matching 
 - `--format json` — output as JSON (with `--pretty` for indentation)
 - `--no-raw` — exclude `raw/` directory from search results
 - `--regex` — treat keyword as a regular expression pattern
+- `--use-index` — use inverted index from `queries/index.json` for faster search (requires `index` to be run first). Falls back to full scan if index is stale or missing.
 
 Output includes: document title, file path, matching lines with line numbers.
 
@@ -294,14 +295,19 @@ Supports detecting circular references (visited nodes are skipped). Max depth: 1
 /wiki index [path] [--output index.json] [--pretty]
 ```
 
-Generate a structured JSON index for frontend consumption.
+Generate a structured JSON index for frontend consumption and search acceleration.
+
+**Two uses:**
+1. **Frontend data** — document metadata grouped by category
+2. **Search acceleration** — inverted index enables `search --use-index` for fast lookup
 
 Output (default `queries/index.json`):
 ```json
 {
   "wiki": {"name": "...", "domain": "...", "created_at": "..."},
-  "generated_at": "2026-05-18 14:30:00",
+  "generated_at": "2026-05-22 14:30:00",
   "total_documents": 12,
+  "latest_modified": "2026-05-22 14:00:00",
   "categories": [
     {
       "category": "concepts",
@@ -310,9 +316,15 @@ Output (default `queries/index.json`):
       "documents": [...]
     }
   ],
-  "tags": ["AI", "tech"]
+  "tags": ["AI", "tech"],
+  "inverted_index": {
+    "attention": [{"file": "concepts/attention.md", "line": 6}, ...],
+    "transformer": [{"file": "concepts/transformer.md", "line": 1}, ...]
+  }
 }
 ```
+
+The `inverted_index` maps lowercase words (2+ chars) to `{file, line}` locations. Used by `search --use-index` to skip full-file scanning. Index freshness is checked via `latest_modified` vs file mtime — if stale, search falls back to full scan automatically.
 
 ## /wiki rename
 
