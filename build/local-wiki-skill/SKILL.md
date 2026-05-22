@@ -142,7 +142,7 @@ Full-text search across all wiki documents. Case-insensitive substring matching 
 - `--format json` — output as JSON (with `--pretty` for indentation)
 - `--no-raw` — exclude `raw/` directory from search results
 - `--regex` — treat keyword as a regular expression pattern
-- `--use-index` — use inverted index from `queries/index.json` for faster search (requires `index` to be run first). Falls back to full scan if index is stale or missing.
+- `--use-index` — use inverted index from `queries/index.json` for faster search (requires `index` to be run first). Falls back to full scan if index is stale or missing. **Note:** index uses word-level matching (`\w{2,}` tokens), so substring searches like Chinese characters (e.g., `中文` in `中文测试`) may not match — use without `--use-index` for substring search.
 
 Output includes: document title, file path, matching lines with line numbers.
 

@@ -109,7 +109,7 @@ def cmd_health(args: argparse.Namespace) -> None:
     # Check 2: Broken wikilinks
     broken_links = []
     for d in user_docs:
-        text = d.get("_text", "")
+        text = d.get("_text") or ""
         if not text:
             try:
                 text = Path(d["absolute_path"]).read_text(encoding="utf-8")
@@ -133,13 +133,13 @@ def cmd_health(args: argparse.Namespace) -> None:
     low_links = [d for d in user_docs if d["links_count"] < 2]
 
     # Check 5: Empty documents
-    empty_docs = [d for d in user_docs if len(d.get("_text", "").strip()) < 50]
+    empty_docs = [d for d in user_docs if len(d.get("_text") or "".strip()) < 50]
 
     # Check 6: Self-referential links
     self_links = []
     for d in user_docs:
         self_stem = Path(d["file"]).stem.lower()
-        text = d.get("_text", "")
+        text = d.get("_text") or ""
         for line_no, line in enumerate(text.splitlines(), 1):
             for m in re.finditer(r"\[\[(.+?)\]\]", line):
                 target = m.group(1).strip().lower().replace(" ", "-")
@@ -159,7 +159,7 @@ def cmd_health(args: argparse.Namespace) -> None:
     fm_warnings: list[dict] = []
     for d in user_docs:
         rel_file = d["file"]
-        text = d.get("_text", "")
+        text = d.get("_text") or ""
         fm = extract_frontmatter_from_text(text)
 
         if not fm:
@@ -202,7 +202,7 @@ def cmd_health(args: argparse.Namespace) -> None:
     stale_docs: list[dict] = []
     cutoff = datetime.now() - timedelta(days=90)
     for d in user_docs:
-        fm = extract_frontmatter_from_text(d.get("_text", ""))
+        fm = extract_frontmatter_from_text(d.get("_text") or "")
         if "updated" in fm:
             try:
                 updated = datetime.strptime(fm["updated"][:10], "%Y-%m-%d")
@@ -281,7 +281,7 @@ def cmd_health(args: argparse.Namespace) -> None:
     # Check 12: Page size (>200 lines)
     large_pages: list[dict] = []
     for d in user_docs:
-        text = d.get("_text", "")
+        text = d.get("_text") or ""
         line_count = len(text.splitlines())
         if line_count > 200:
             large_pages.append({"file": d["file"], "lines": line_count})
@@ -448,7 +448,7 @@ def cmd_health(args: argparse.Namespace) -> None:
     if empty_docs:
         print(f"\n   ── 空文档 ──")
         for d in empty_docs[:10]:
-            text = d.get("_text", "")
+            text = d.get("_text") or ""
             print(f"   📄 {d['title']}  ({d['file']}, {len(text.strip())} 字节)")
         if len(empty_docs) > 10:
             print(f"   ... 共 {len(empty_docs)} 篇空文档")
@@ -660,7 +660,7 @@ def cmd_fix(args: argparse.Namespace) -> None:
     for d in docs:
         if d["category"] == "raw":
             continue
-        text = d.get("_text", "")
+        text = d.get("_text") or ""
         if not text:
             continue
         for m in re.finditer(r"\[\[(.+?)\]\]", text):
@@ -681,7 +681,7 @@ def cmd_fix(args: argparse.Namespace) -> None:
     for d in docs:
         if d["category"] == "raw":
             continue
-        text = d.get("_text", "")
+        text = d.get("_text") or ""
         if not text:
             continue
         for m in re.finditer(r"\[\[(.+?)\]\]", text):
@@ -873,7 +873,7 @@ def cmd_rename(args: argparse.Namespace) -> None:
 
     # 2. Scan for wikilink references
     for d in docs:
-        text = d.get("_text", "")
+        text = d.get("_text") or ""
         for m in re.finditer(r"\[\[(.+?)\]\]", text):
             link_target = m.group(1).strip().lower().replace(" ", "-")
             if link_target == old_stem:
@@ -885,7 +885,7 @@ def cmd_rename(args: argparse.Namespace) -> None:
                 })
 
     # 3. Update internal heading
-    for line_no, line in enumerate(source_doc.get("_text", "").splitlines(), 1):
+    for line_no, line in enumerate(source_doc.get("_text") or "".splitlines(), 1):
         stripped = line.strip()
         if stripped.startswith("# ") and not stripped.startswith("## "):
             heading = stripped[2:]
@@ -993,7 +993,7 @@ def cmd_archive(args: argparse.Namespace) -> None:
     for d in docs:
         if d["file"] == old_rel:
             continue
-        text = d.get("_text", "")
+        text = d.get("_text") or ""
         for m in re.finditer(r"\[\[(.+?)\]\]", text):
             link_target = m.group(1).strip().lower().replace(" ", "-")
             if link_target == target_stem:

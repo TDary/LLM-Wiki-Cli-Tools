@@ -196,13 +196,15 @@ def _load_docs_from_index(wiki_path: Path) -> list[dict] | None:
     if not inverted:
         return None
 
-    # Freshness: index mtime >= stored latest_modified
+    # Freshness: check actual file mtimes against index mtime
     index_mtime = index_path.stat().st_mtime
-    latest_str = idx.get("latest_modified", "")
-    if latest_str:
-        latest_ts = datetime.strptime(latest_str, "%Y-%m-%d %H:%M:%S").timestamp()
-        if index_mtime < latest_ts:
-            return None
+    for d in DIRS:
+        cat_dir = wiki_path / d
+        if not cat_dir.is_dir():
+            continue
+        for md_file in cat_dir.glob("*.md"):
+            if md_file.stat().st_mtime > index_mtime:
+                return None
 
     docs = []
     for cat in idx.get("categories", []):

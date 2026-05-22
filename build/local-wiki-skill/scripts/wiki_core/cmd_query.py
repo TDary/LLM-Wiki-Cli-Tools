@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import DIRS, CATEGORY_LABELS, SYSTEM_FILES
 from .helpers import (
-    expand, require_wiki, now, collect_documents, collect_documents_cached, read_schema_meta,
+    expand, require_wiki, now, collect_documents, collect_documents_cached, clear_doc_cache, read_schema_meta,
     search_documents, build_backlink_map, _strip_internal,
     extract_frontmatter_from_text, extract_title, _lazy_load_text,
 )
@@ -112,6 +112,7 @@ def cmd_index(args: argparse.Namespace) -> None:
 
     indent = 2 if args.pretty else None
     output_path.write_text(json.dumps(index, ensure_ascii=False, indent=indent), encoding="utf-8")
+    clear_doc_cache()
 
     print(f"✅ 索引已生成: {output_path}")
     print(f"   文档总数: {len(docs)}")
@@ -136,14 +137,15 @@ def _try_index_search(path: Path, keyword: str, docs: list[dict], no_raw: bool =
     if not inv:
         return None
 
-    # Freshness: index mtime must be >= latest doc mtime
+    # Freshness: index mtime must be >= latest actual file mtime
     index_mtime = os.path.getmtime(index_path)
-    latest_mod = max(
-        (datetime.strptime(d["modified"], "%Y-%m-%d %H:%M:%S").timestamp() for d in docs),
-        default=0,
-    )
-    if index_mtime < latest_mod:
-        return None
+    for d in DIRS:
+        cat_dir = path / d
+        if not cat_dir.is_dir():
+            continue
+        for md_file in cat_dir.glob("*.md"):
+            if md_file.stat().st_mtime > index_mtime:
+                return None
 
     kw_lower = keyword.lower()
     entries = inv.get(kw_lower, [])
