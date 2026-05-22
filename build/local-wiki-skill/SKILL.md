@@ -4,7 +4,7 @@ version: 1.2.1
 description: 创建、查询和管理本地知识库，纯文件模式，零依赖
 ---
 
-# Local Wiki Skill v1.2.0
+# Local Wiki Skill v1.2.1
 
 Zero-dependency local wiki management for Claude Code. Pure Python, pure files — no Git, no network, just Python 3.9+.
 
@@ -51,6 +51,7 @@ local-wiki-skill/
 | `rename` 执行成功 | 验证所有 wikilinks 已更新，检查 index.md 是否同步，更新 log.md |
 | `archive` 执行成功 | 验证 index.md 中已移除该页面，检查是否有上下文引用需要更新（如 query 页面），更新 log.md |
 | `fix --apply` 执行成功 | 向用户报告修复详情（哪些链接被改了），验证修复结果，更新 log.md |
+| `search` 查询后回写新页面 | 必须遵循 New page rule（frontmatter + ≥2 wikilinks + log + index） |
 
 **违反以上任何一条 = 任务未完成。**
 
@@ -567,7 +568,9 @@ Manifest format:
 ☐ 已识别概念（术语/方法论/技术原理）
 ☐ 已识别关系（对比/依赖/实现）
 ☐ 已检查现有 wiki 页面，避免重复
-☐ 已为每个提取项创建 wiki 页面（含 frontmatter + wikilinks）
+☐ 已为每个提取项创建 wiki 页面（含 frontmatter + ≥2 条 wikilinks）
+☐ 已建立反向链接：检查已有页面是否需要添加指向新页面的 [[wikilink]]
+☐ 已更新 index.md（如有）或重新生成 queries/index.json
 ☐ 已更新 log.md
 ```
 
@@ -633,8 +636,10 @@ Agent:
   2. 读取 raw/arxiv-2301-00001.md
   3. 分析内容，识别出 3 个实体、2 个概念、1 个关系
   4. 创建 6 个 wiki 页面（带 frontmatter 和交叉引用）
-  5. 更新 log.md
-  6. 汇报：创建了 entities/xxx.md, concepts/yyy.md 等
+  5. 检查已有页面，添加反向 [[wikilinks]]
+  6. 更新 index.md（如有）
+  7. 更新 log.md
+  8. 汇报：创建了 entities/xxx.md, concepts/yyy.md 等
 ```
 
 ### Page Type Mapping
