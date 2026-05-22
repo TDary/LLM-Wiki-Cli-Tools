@@ -375,6 +375,9 @@ def _ingest_manifest(wiki_path: Path, args: argparse.Namespace) -> None:
             "errors": len(errors),
             "results": results,
             "errors_detail": errors,
+            "agent_required": True,
+            "agent_instruction": "批量摄入仅完成结构层。Agent 必须对每个成功摄入的源文件逐一执行知识提取（读取 raw/ → 提取实体/概念/关系 → 创建 wiki 页面 → 交叉引用 → 更新 log.md）。详见 SKILL.md「批量摄入工作流」。",
+            "pending_files": [r.get("destination", "") for r in results],
         }
         print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
         return
@@ -387,6 +390,17 @@ def _ingest_manifest(wiki_path: Path, args: argparse.Namespace) -> None:
         for e in errors:
             print(f"   [{e['index']}] {e['error']}")
     print(f"\n📝 日志已更新: log.md")
+
+    # Remind agent: batch structural ingest is done, semantic extraction is next
+    print(f"\n⚠️  批量摄入仅完成结构层（保存到 raw/）。Agent 必须继续执行：")
+    print(f"   对每个成功摄入的源文件，逐一执行完整的知识提取流程。")
+    print(f"   详见 SKILL.md「批量摄入工作流」。")
+    if results:
+        print(f"\n   待处理文件清单：")
+        for r in results:
+            dest = r.get("destination", "")
+            title = r.get("title", "?")
+            print(f"   ☐ {dest} — {title}")
 
 
 # ── command ──

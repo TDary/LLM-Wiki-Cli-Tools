@@ -44,7 +44,7 @@ local-wiki-skill/
 | 触发条件 | 强制动作 |
 |---------|---------|
 | `ingest --url` 或 `ingest --file` 执行成功 | 立即读取 raw/ 中的源文件，执行知识提取（见"Full Ingest Workflow"） |
-| `ingest --manifest` 批量执行成功 | 对每个成功摄入的源文件，逐一执行知识提取 |
+| `ingest --manifest` 批量执行成功 | CLI 输出含「待处理文件清单」。Agent 必须按「批量摄入工作流」逐一执行知识提取，不可跳过任何文件 |
 | `health` 检查发现断链 | 立即运行 `fix --apply` 修复 |
 | `health` 检查发现孤立文档 | 为每个孤立文档建立至少 1 条 `[[wikilink]]` 关联 |
 | `search` 返回结果且用户问题需要综合分析 | 读取匹配文档全文，综合回答后判断是否回写 |
@@ -636,6 +636,45 @@ The `ingest` CLI command handles **structural operations** (save file, update lo
 7. **记录日志** — 在 `log.md` 中记录所有创建/更新操作
 
 **一个源文件通常触发 5-15 个 wiki 页面的创建/更新** — 这是知识库的复利效应。
+
+### 批量摄入工作流（--manifest）
+
+批量摄入 CLI 只完成**结构层**（下载/复制 → raw/ + log.md）。Agent 必须对每个成功摄入的源文件逐一执行**知识提取层**。不可跳过。
+
+**CLI 输出中的「待处理文件清单」是 Agent 的任务列表，逐条处理直到全部完成。**
+
+**批量摄入执行 Checklist（Agent 必须逐项确认，对每个文件）：**
+
+```
+☐ 已从 CLI 输出获取「待处理文件清单」
+☐ 对清单中的每个文件，执行以下循环：
+
+  文件 N: raw/<filename>.md
+  ☐ 已读取该文件完整内容
+  ☐ 已识别实体 → 创建 entities/<name>.md（含 frontmatter + wikilinks）
+  ☐ 已识别概念 → 创建 concepts/<name>.md（含 frontmatter + wikilinks）
+  ☐ 已识别关系 → 创建 relations/<a>-vs-<b>.md（含 frontmatter + wikilinks）
+  ☐ 已检查已有页面，添加反向 [[wikilinks]]
+  ☐ 已更新 log.md
+
+☐ 全部文件处理完毕后，已更新 index.md 或重新生成 queries/index.json
+☐ 已向用户汇报：创建/更新了哪些页面
+```
+
+**跳过任何一个文件 = 任务未完成。**
+
+**强制循环结构：**
+
+```
+for file in CLI输出的待处理文件清单:
+    1. 读取 raw/<file> 完整内容
+    2. 提取实体、概念、关系
+    3. 为每个提取项创建 wiki 页面（遵循 New page rule）
+    4. 建立交叉引用（≥2 wikilinks/页）
+    5. 检查已有页面是否需要反向链接
+```
+
+**Agent 不可因文件数量多而跳过或批量略过。** 每个源文件都是独立的知识提取任务。
 
 ### Agent 调用示例
 
