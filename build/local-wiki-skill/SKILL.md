@@ -31,7 +31,7 @@ local-wiki-skill/
         ├── templates.py # Template generators
         ├── cmd_init.py # init, sync, bootstrap, install
         ├── cmd_query.py # list, index, search, backlinks, tags, stats
-        ├── cmd_health.py # health, orphans, trace, fix, rename
+        ├── cmd_health.py # health, orphans, trace, fix, rename, archive
         └── cmd_ingest.py # ingest (URL, file, template)
 ```
 
@@ -70,7 +70,7 @@ local-wiki-skill/
 | `python scripts/wiki.py health [path]` | Run full health check on wiki |
 | `python scripts/wiki.py trace <page> [path]` | Trace upstream/downstream dependency chain |
 | `python scripts/wiki.py fix [path]` | Auto-fix broken links and normalize naming |
-| `python scripts/wiki.py index [path]` | Generate JSON index for frontend |
+| `python scripts/wiki.py index [path]` | Generate JSON index + inverted search index |
 | `python scripts/wiki.py rename <old> <new> [path]` | Rename document and update all wikilinks |
 | `python scripts/wiki.py archive <page> [path]` | Archive document to `_archive/` directory |
 | `python scripts/wiki.py tags [path]` | List all tags with counts and documents |
@@ -695,7 +695,7 @@ When reading/writing wiki pages:
 5. **Always log**: append to `log.md` after every action
 6. **Read first**: before writing, check `SCHEMA.md`, `README.md`, and recent `log.md`
 7. **No skip rule**: Agent 必须完成 workflow 中的所有步骤。CLI 执行成功 ≠ 任务完成。知识提取、交叉引用、日志更新是强制步骤。
-8. **New page rule**: 创建任何新 wiki 页面时，以下 4 项缺一不可：① 完整 frontmatter（title/created/updated/type/tags/sources）② ≥2 条 `[[wikilinks]]` 出站链接 ③ 更新 `log.md` ④ 更新 `index.md`（如有）
+8. **New page rule**: 创建任何新 wiki 页面时，以下 4 项缺一不可：① 完整 frontmatter（title/created/updated/type/tags/sources）② ≥2 条 `[[wikilinks]]` 出站链接 ③ 更新 `log.md` ④ 更新 `index.md`（如有）或重新生成 `queries/index.json`
 
 ## Wiki Structure
 
