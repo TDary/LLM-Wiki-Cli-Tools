@@ -885,7 +885,7 @@ def cmd_rename(args: argparse.Namespace) -> None:
                 })
 
     # 3. Update internal heading
-    for line_no, line in enumerate(source_doc.get("_text") or "".splitlines(), 1):
+    for line_no, line in enumerate((source_doc.get("_text") or "").splitlines(), 1):
         stripped = line.strip()
         if stripped.startswith("# ") and not stripped.startswith("## "):
             heading = stripped[2:]
@@ -930,7 +930,7 @@ def cmd_rename(args: argparse.Namespace) -> None:
             fp = path / f
             text = fp.read_text(encoding="utf-8")
             for a in actions:
-                if a["file"] == f:
+                if a["file"] == f and a["type"] in ("update_link", "update_heading"):
                     text = text.replace(a["original"], a["new"])
             fp.write_text(text, encoding="utf-8")
             print(f"   ✅ 已更新: {f}")
