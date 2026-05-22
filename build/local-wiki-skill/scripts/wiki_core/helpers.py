@@ -68,36 +68,32 @@ def extract_frontmatter_from_text(text: str) -> dict:
     return fm
 
 
-def build_backlink_map(wiki_path: Path) -> dict[str, list[dict]]:
+def build_backlink_map(wiki_path: Path, docs: list[dict] | None = None) -> dict[str, list[dict]]:
     """Build a map of {target_file: [source_doc_info, ...]} from all wikilinks."""
+    if docs is None:
+        docs = collect_documents(wiki_path)
     backlinks: dict[str, list[dict]] = {}
-    for d in DIRS:
-        category_dir = wiki_path / d
-        if not category_dir.is_dir():
+    for doc in docs:
+        rel_file = doc["file"]
+        title = doc["title"]
+        text = doc.get("_text", "")
+        if not text:
             continue
-        for md_file in sorted(category_dir.glob("*.md")):
-            try:
-                text = md_file.read_text(encoding="utf-8")
-            except Exception:
-                continue
-            rel_file = str(md_file.relative_to(wiki_path)).replace("\\", "/")
-            fm = extract_frontmatter_from_text(text)
-            title = fm.get("title") or extract_title(md_file)
-            text_lines = text.splitlines()
-            link_targets = [m.group(1) for m in re.finditer(r"\[\[(.+?)\]\]", text)]
-            for target in link_targets:
-                target_stem = target.strip().lower().replace(" ", "-")
-                if target_stem not in backlinks:
-                    backlinks[target_stem] = []
-                link_pattern = f"[[{target}]]"
-                for line_no, line in enumerate(text_lines, 1):
-                    if link_pattern in line:
-                        backlinks[target_stem].append({
-                            "source_title": title,
-                            "source_file": rel_file,
-                            "line": line_no,
-                            "line_content": line.strip(),
-                        })
+        text_lines = text.splitlines()
+        link_targets = [m.group(1) for m in re.finditer(r"\[\[(.+?)\]\]", text)]
+        for target in link_targets:
+            target_stem = target.strip().lower().replace(" ", "-")
+            if target_stem not in backlinks:
+                backlinks[target_stem] = []
+            link_pattern = f"[[{target}]]"
+            for line_no, line in enumerate(text_lines, 1):
+                if link_pattern in line:
+                    backlinks[target_stem].append({
+                        "source_title": title,
+                        "source_file": rel_file,
+                        "line": line_no,
+                        "line_content": line.strip(),
+                    })
     return backlinks
 
 
@@ -162,6 +158,22 @@ def collect_documents(wiki_path: Path) -> list[dict]:
                 "_text": text,
             })
     return docs
+
+
+_doc_cache: dict[str, list[dict]] = {}
+
+
+def collect_documents_cached(wiki_path: Path) -> list[dict]:
+    """Return cached collect_documents result for the given path."""
+    key = str(wiki_path)
+    if key not in _doc_cache:
+        _doc_cache[key] = collect_documents(wiki_path)
+    return _doc_cache[key]
+
+
+def clear_doc_cache() -> None:
+    """Clear the document cache (for testing or after mutations)."""
+    _doc_cache.clear()
 
 
 def read_schema_meta(wiki_path: Path) -> dict:
@@ -287,31 +299,23 @@ def _strip_internal(docs: list[dict]) -> list[dict]:
     return [{k: v for k, v in d.items() if not k.startswith("_")} for d in docs]
 
 
-def build_link_graph(wiki_path: Path) -> tuple[dict[str, list[str]], dict[str, dict]]:
+def build_link_graph(wiki_path: Path, docs: list[dict] | None = None) -> tuple[dict[str, list[str]], dict[str, dict]]:
     """Build bidirectional link graph. Returns (outbound_map, doc_info_map)."""
+    if docs is None:
+        docs = collect_documents(wiki_path)
     outbound: dict[str, list[str]] = {}
     doc_info: dict[str, dict] = {}
 
-    for d in DIRS:
-        category_dir = wiki_path / d
-        if not category_dir.is_dir():
-            continue
-        for md_file in sorted(category_dir.glob("*.md")):
-            try:
-                text = md_file.read_text(encoding="utf-8")
-            except Exception:
-                continue
-            stem = md_file.stem.lower()
-            fm = extract_frontmatter_from_text(text)
-            title = fm.get("title") or extract_title(md_file)
-            rel_file = str(md_file.relative_to(wiki_path)).replace("\\", "/")
-            doc_info[stem] = {"title": title, "file": rel_file, "category": d}
+    for doc in docs:
+        stem = Path(doc["file"]).stem.lower()
+        text = doc.get("_text", "")
+        doc_info[stem] = {"title": doc["title"], "file": doc["file"], "category": doc["category"]}
 
-            targets = []
-            for m in re.finditer(r"\[\[(.+?)\]\]", text):
-                target_stem = m.group(1).strip().lower().replace(" ", "-")
-                targets.append(target_stem)
-            outbound[stem] = targets
+        targets = []
+        for m in re.finditer(r"\[\[(.+?)\]\]", text):
+            target_stem = m.group(1).strip().lower().replace(" ", "-")
+            targets.append(target_stem)
+        outbound[stem] = targets
 
     return outbound, doc_info
 

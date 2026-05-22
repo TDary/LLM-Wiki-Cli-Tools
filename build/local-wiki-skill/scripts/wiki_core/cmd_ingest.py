@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
 from . import DIRS, CATEGORY_LABELS
-from .helpers import expand, require_wiki, now, today, collect_documents, read_schema_meta, append_to_log
+from .helpers import expand, require_wiki, now, today, collect_documents, clear_doc_cache, read_schema_meta, append_to_log
 from .templates import template_wiki_page
 
 
@@ -362,6 +362,8 @@ def _ingest_manifest(wiki_path: Path, args: argparse.Namespace) -> None:
             details.append(f"  ... and {len(results) - 5} more")
         append_to_log(wiki_path, f"bulk ingest | {len(results)} sources", details)
 
+    clear_doc_cache()
+
     # Output
     if args.format == "json":
         meta = read_schema_meta(wiki_path)
@@ -536,6 +538,8 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             "tags": tags,
             "log_updated": True,
         }
+
+    clear_doc_cache()
 
     # ── Output ──
     if args.format == "json":

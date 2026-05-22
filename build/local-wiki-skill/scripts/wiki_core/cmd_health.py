@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import DIRS, SYSTEM_FILES
 from .helpers import (
-    expand, require_wiki, today, collect_documents, read_schema_meta,
+    expand, require_wiki, today, collect_documents_cached, clear_doc_cache, read_schema_meta,
     build_backlink_map, build_link_graph, trace_graph, find_closest,
     read_health_config, read_custom_checks, _strip_internal,
     extract_frontmatter_from_text, _extract_yaml_block, _parse_yaml_kv_pairs,
@@ -37,8 +37,8 @@ def cmd_orphans(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
     require_wiki(path)
 
-    docs = collect_documents(path)
-    backlinks = build_backlink_map(path)
+    docs = collect_documents_cached(path)
+    backlinks = build_backlink_map(path, docs)
 
     orphans = []
     for doc in docs:
@@ -81,8 +81,8 @@ def cmd_health(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
     require_wiki(path)
 
-    docs = collect_documents(path)
-    backlinks = build_backlink_map(path)
+    docs = collect_documents_cached(path)
+    backlinks = build_backlink_map(path, docs)
     weights = read_health_config(path)
 
     user_docs = [d for d in docs if d["category"] != "raw" and Path(d["file"]).stem.lower() not in SYSTEM_FILES]
@@ -109,15 +109,13 @@ def cmd_health(args: argparse.Namespace) -> None:
         for m in re.finditer(r"\[\[(.+?)\]\]", text):
             target = m.group(1).strip().lower().replace(" ", "-")
             if target not in existing_stems:
-                for line_no, line in enumerate(text.splitlines(), 1):
-                    if f"[[{m.group(1)}]]" in line:
-                        broken_links.append({
-                            "source_file": d["file"],
-                            "source_title": d["title"],
-                            "target": m.group(1),
-                            "line": line_no,
-                        })
-                        break
+                line_no = text[:m.start()].count("\n") + 1
+                broken_links.append({
+                    "source_file": d["file"],
+                    "source_title": d["title"],
+                    "target": m.group(1),
+                    "line": line_no,
+                })
 
     # Check 3: No tags
     no_tags = [d for d in user_docs if not d.get("tags")]
@@ -150,39 +148,30 @@ def cmd_health(args: argparse.Namespace) -> None:
     tag_taxonomy = _read_tag_taxonomy(path)
     fm_errors: list[dict] = []
     fm_warnings: list[dict] = []
-    for d in DIRS:
-        if d == "raw":
+    for d in user_docs:
+        rel_file = d["file"]
+        text = d.get("_text", "")
+        fm = extract_frontmatter_from_text(text)
+
+        if not fm:
+            fm_errors.append({"file": rel_file, "issue": "缺少 frontmatter"})
             continue
-        category_dir = path / d
-        if not category_dir.is_dir():
-            continue
-        for md_file in sorted(category_dir.glob("*.md")):
-            try:
-                text = md_file.read_text(encoding="utf-8")
-            except Exception:
-                continue
-            rel_file = str(md_file.relative_to(path)).replace("\\", "/")
-            fm = extract_frontmatter_from_text(text)
 
-            if not fm:
-                fm_errors.append({"file": rel_file, "issue": "缺少 frontmatter"})
-                continue
+        for field in REQUIRED_FRONTMATTER:
+            if field not in fm:
+                fm_errors.append({"file": rel_file, "issue": f"缺少字段: {field}"})
 
-            for field in REQUIRED_FRONTMATTER:
-                if field not in fm:
-                    fm_errors.append({"file": rel_file, "issue": f"缺少字段: {field}"})
+        if "type" in fm and fm["type"] not in VALID_TYPES:
+            fm_errors.append({"file": rel_file, "issue": f"无效 type: {fm['type']}"})
 
-            if "type" in fm and fm["type"] not in VALID_TYPES:
-                fm_errors.append({"file": rel_file, "issue": f"无效 type: {fm['type']}"})
+        for date_field in ("created", "updated"):
+            if date_field in fm and not re.match(r"^\d{4}-\d{2}-\d{2}", fm[date_field]):
+                fm_warnings.append({"file": rel_file, "issue": f"日期格式: {date_field}={fm[date_field]}"})
 
-            for date_field in ("created", "updated"):
-                if date_field in fm and not re.match(r"^\d{4}-\d{2}-\d{2}", fm[date_field]):
-                    fm_warnings.append({"file": rel_file, "issue": f"日期格式: {date_field}={fm[date_field]}"})
-
-            if tag_taxonomy and "tags" in fm:
-                for tag in fm["tags"]:
-                    if tag and tag not in tag_taxonomy:
-                        fm_warnings.append({"file": rel_file, "issue": f"标签不在体系中: {tag}"})
+        if tag_taxonomy and "tags" in fm:
+            for tag in fm["tags"]:
+                if tag and tag not in tag_taxonomy:
+                    fm_warnings.append({"file": rel_file, "issue": f"标签不在体系中: {tag}"})
 
     # Check 8: Index completeness
     index_issues: list[dict] = []
@@ -193,18 +182,10 @@ def cmd_health(args: argparse.Namespace) -> None:
             index_links = set()
             for m in re.finditer(r"\[\[(.+?)\]\]", index_text):
                 index_links.add(m.group(1).strip().lower().replace(" ", "-"))
-            for d in DIRS:
-                if d == "raw":
-                    continue
-                category_dir = path / d
-                if not category_dir.is_dir():
-                    continue
-                for md_file in sorted(category_dir.glob("*.md")):
-                    if md_file.stem.lower() in SYSTEM_FILES:
-                        continue
-                    if md_file.stem.lower() not in index_links:
-                        rel_file = str(md_file.relative_to(path)).replace("\\", "/")
-                        index_issues.append({"file": rel_file, "issue": "未在 index.md 中"})
+            for d in user_docs:
+                stem = Path(d["file"]).stem.lower()
+                if stem not in index_links:
+                    index_issues.append({"file": d["file"], "issue": "未在 index.md 中"})
         except Exception:
             pass
 
@@ -245,14 +226,11 @@ def cmd_health(args: argparse.Namespace) -> None:
                 tag_pages.setdefault(tag, []).append(d["file"])
 
     # Build entity → pages map (pages that link to the same targets)
-    outbound_map, _ = build_link_graph(path)
+    outbound_map, _ = build_link_graph(path, docs)
+    stem_to_file = {Path(d["file"]).stem.lower(): d["file"] for d in user_docs}
     entity_pages: dict[str, list[str]] = {}
     for stem, targets in outbound_map.items():
-        source_file = None
-        for d in user_docs:
-            if Path(d["file"]).stem.lower() == stem:
-                source_file = d["file"]
-                break
+        source_file = stem_to_file.get(stem)
         if not source_file:
             continue
         for target in targets:
@@ -579,7 +557,8 @@ def cmd_trace(args: argparse.Namespace) -> None:
         page = page[:-3]
     target_stem = page.strip().lower().replace(" ", "-")
 
-    outbound, doc_info = build_link_graph(path)
+    docs = collect_documents_cached(path)
+    outbound, doc_info = build_link_graph(path, docs)
 
     inbound: dict[str, list[str]] = {}
     for source, targets in outbound.items():
@@ -660,9 +639,9 @@ def cmd_fix(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
     require_wiki(path)
 
-    docs = collect_documents(path)
-    outbound, doc_info = build_link_graph(path)
-    existing_stems = set(doc_info.keys())
+    docs = collect_documents_cached(path)
+    outbound, doc_info = build_link_graph(path, docs)
+    existing_stems = {k for k, v in doc_info.items() if v["category"] != "raw"}
 
     fixes = []
 
@@ -747,8 +726,9 @@ def cmd_fix(args: argparse.Namespace) -> None:
     applied_count = 0
     skipped_count = 0
 
-    def _apply_fix(fix: dict, skip_label: str) -> str:
-        nonlocal applied_count, skipped_count
+    def _confirm_fix(fix: dict, skip_label: str) -> str:
+        """Interactive confirmation for a single fix. Returns 'apply', 'skipped', or 'skip_remaining'."""
+        nonlocal skipped_count
         if interactive and fix["type"] not in skip_types:
             status = "✅ 可修复" if fix["suggestion"] else "⚠️  需手动"
             print(f"   {status}  {fix['file']}: {fix['action']}")
@@ -765,36 +745,70 @@ def cmd_fix(args: argparse.Namespace) -> None:
                 skipped_count += 1
                 print(f"   ⏭️  已跳过")
                 return "skipped"
-
-        filepath = path / fix["file"]
-        text = filepath.read_text(encoding="utf-8")
-        if fix["suggestion"]:
-            info = doc_info[fix["suggestion"]]
-            new_text = text.replace(f"[[{fix['original']}]]", f"[[{info['title']}]]")
-            filepath.write_text(new_text, encoding="utf-8")
-            print(f"   ✅ {fix['file']}: {fix['action']}")
-            applied_count += 1
-        else:
+        if not fix["suggestion"]:
             print(f"   ⏭️  {fix['file']}: {fix['action']} (需手动处理)")
-        return "applied"
+            return "skipped"
+        return "apply"
+
+    def _print_dry_run(fix_list: list[dict]) -> None:
+        for f in fix_list:
+            status = "✅ 可修复" if f["suggestion"] else "⚠️  需手动"
+            print(f"   {status}  {f['file']}: {f['action']}")
 
     if broken:
         print(f"   ── 断链修复 ({len(broken)} 处) ──")
-        for f in broken:
-            if args.apply:
-                _apply_fix(f, "断链修复")
-            else:
-                status = "✅ 可修复" if f["suggestion"] else "⚠️  需手动"
-                print(f"   {status}  {f['file']}: {f['action']}")
+        if args.apply:
+            # Collect fixes to apply, grouped by file
+            fixes_by_file: dict[str, list[dict]] = {}
+            for f in broken:
+                result = _confirm_fix(f, "断链修复")
+                if result == "skip_remaining":
+                    break
+                elif result == "apply":
+                    fixes_by_file.setdefault(f["file"], []).append(f)
+
+            # Batch apply: read each file once, apply all fixes, write once
+            for filepath, file_fixes in fixes_by_file.items():
+                fp = path / filepath
+                text = fp.read_text(encoding="utf-8")
+                for f in file_fixes:
+                    if f["suggestion"] and f["suggestion"] in doc_info:
+                        info = doc_info[f["suggestion"]]
+                        text = text.replace(f"[[{f['original']}]]", f"[[{info['title']}]]")
+                    elif f["suggestion"]:
+                        text = text.replace(f"[[{f['original']}]]", f"[[{f['suggestion']}]]")
+                    print(f"   ✅ {f['file']}: {f['action']}")
+                    applied_count += 1
+                fp.write_text(text, encoding="utf-8")
+        else:
+            _print_dry_run(broken)
         print()
 
     if norm:
         print(f"   ── 命名规范化 ({len(norm)} 处) ──")
-        for f in norm:
-            if args.apply:
-                _apply_fix(f, "规范化")
-            else:
-                print(f"   ✅ 可修复  {f['file']}: {f['action']}")
+        if args.apply:
+            fixes_by_file = {}
+            for f in norm:
+                result = _confirm_fix(f, "规范化")
+                if result == "skip_remaining":
+                    break
+                elif result == "apply":
+                    fixes_by_file.setdefault(f["file"], []).append(f)
+
+            for filepath, file_fixes in fixes_by_file.items():
+                fp = path / filepath
+                text = fp.read_text(encoding="utf-8")
+                for f in file_fixes:
+                    if f["suggestion"] and f["suggestion"] in doc_info:
+                        info = doc_info[f["suggestion"]]
+                        text = text.replace(f"[[{f['original']}]]", f"[[{info['title']}]]")
+                    elif f["suggestion"]:
+                        text = text.replace(f"[[{f['original']}]]", f"[[{f['suggestion']}]]")
+                    print(f"   ✅ {f['file']}: {f['action']}")
+                    applied_count += 1
+                fp.write_text(text, encoding="utf-8")
+        else:
+            _print_dry_run(norm)
         print()
 
     if not args.apply:
@@ -804,8 +818,10 @@ def cmd_fix(args: argparse.Namespace) -> None:
         print(f"      使用 --apply 执行自动修复。")
         if not getattr(args, "interactive", False):
             print(f"      使用 --interactive 逐条确认。")
-    elif getattr(args, "interactive", False):
-        print(f"   已应用 {applied_count} 项，跳过 {skipped_count} 项。")
+    else:
+        clear_doc_cache()
+        if getattr(args, "interactive", False):
+            print(f"   已应用 {applied_count} 项，跳过 {skipped_count} 项。")
 
 
 def cmd_rename(args: argparse.Namespace) -> None:
@@ -819,7 +835,7 @@ def cmd_rename(args: argparse.Namespace) -> None:
     new_stem = new_name.strip().lower().replace(" ", "-")
     new_title = new_name.strip().replace("-", " ").title()
 
-    docs = collect_documents(path)
+    docs = collect_documents_cached(path)
     source_doc = None
     for d in docs:
         stem = Path(d["file"]).stem.lower()
@@ -911,6 +927,7 @@ def cmd_rename(args: argparse.Namespace) -> None:
         new_path = path / new_rel
         old_path.rename(new_path)
         print(f"\n   ✅ 文件已重命名: {old_rel} → {new_rel}")
+        clear_doc_cache()
         print(f"\n   重命名完成！")
     else:
         print(f"\n   💡 使用 --apply 执行重命名。")
@@ -926,7 +943,7 @@ def cmd_archive(args: argparse.Namespace) -> None:
     target_stem = page.strip().lower().replace(" ", "-")
 
     # Find the source document
-    docs = collect_documents(path)
+    docs = collect_documents_cached(path)
     source_doc = None
     for d in docs:
         if Path(d["file"]).stem.lower() == target_stem:
@@ -1077,6 +1094,7 @@ def cmd_archive(args: argparse.Namespace) -> None:
             pass
 
         print(f"\n   归档完成！")
+        clear_doc_cache()
     else:
         link_count = len([a for a in actions if a["type"] == "update_link"])
         print(f"\n   💡 将更新 {link_count} 处引用，移动文件到 _archive/。")

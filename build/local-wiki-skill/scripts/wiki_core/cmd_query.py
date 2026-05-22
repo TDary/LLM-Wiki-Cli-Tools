@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import DIRS, CATEGORY_LABELS, SYSTEM_FILES
 from .helpers import (
-    expand, require_wiki, now, collect_documents, read_schema_meta,
+    expand, require_wiki, now, collect_documents, collect_documents_cached, read_schema_meta,
     search_documents, build_backlink_map, _strip_internal,
 )
 
@@ -17,7 +17,7 @@ def cmd_list(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
     require_wiki(path)
 
-    docs = collect_documents(path)
+    docs = collect_documents_cached(path)
 
     if hasattr(args, "category") and args.category:
         docs = [d for d in docs if d["category"] == args.category]
@@ -59,7 +59,7 @@ def cmd_index(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
     require_wiki(path)
 
-    docs = collect_documents(path)
+    docs = collect_documents_cached(path)
     meta = read_schema_meta(path)
 
     by_category = {}
@@ -104,7 +104,7 @@ def cmd_search(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
     require_wiki(path)
 
-    docs = collect_documents(path)
+    docs = collect_documents_cached(path)
 
     if getattr(args, "no_raw", False):
         docs = [d for d in docs if d["category"] != "raw"]
@@ -150,7 +150,7 @@ def cmd_backlinks(args: argparse.Namespace) -> None:
         page = page[:-3]
     target_stem = page.strip().lower().replace(" ", "-")
 
-    backlinks = build_backlink_map(path)
+    backlinks = build_backlink_map(path, collect_documents_cached(path))
     refs = backlinks.get(target_stem, [])
 
     if args.format == "json":
@@ -183,7 +183,7 @@ def cmd_tags(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
     require_wiki(path)
 
-    docs = collect_documents(path)
+    docs = collect_documents_cached(path)
 
     tag_map: dict[str, dict] = {}
     for d in docs:
@@ -237,8 +237,8 @@ def cmd_stats(args: argparse.Namespace) -> None:
     path = expand(args.path or ".")
     require_wiki(path)
 
-    docs = collect_documents(path)
-    backlinks = build_backlink_map(path)
+    docs = collect_documents_cached(path)
+    backlinks = build_backlink_map(path, docs)
 
     cat_count: dict[str, int] = {}
     for d in docs:
