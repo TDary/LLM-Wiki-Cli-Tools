@@ -389,7 +389,7 @@ wiki/
 **archive 后验证 Checklist：**
 
 ```
-☐ 已确认所有引用该页面的 [[wikilinks]] 已更新为纯文本 + "（已归档）"
+☐ 已确认所有引用该页面的 [[wikilinks]] 已更新为纯文本 + "（已归档）" 标注
 ☐ 已确认 index.md 中已移除该页面
 ☐ 已确认文件已移至 _archive/ 目录
 ☐ 已检查是否有 query/relations 页面引用了归档内容，需要更新上下文
@@ -499,7 +499,8 @@ Agent:
   4. 读取这 4 个页面全文
   5. 综合分析，给出对比建议
   6. 回写: relations/rag-vs-fine-tuning.md（含对比表格和结论）
-  7. 更新 log.md
+  7. 更新 index.md（如有）
+  8. 更新 log.md
 ```
 
 ## /wiki ingest
