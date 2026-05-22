@@ -1,10 +1,10 @@
 ---
 name: wiki
-version: 1.1.1
+version: 1.2.0
 description: 创建、查询和管理本地知识库，纯文件模式，零依赖
 ---
 
-# Local Wiki Skill v1.1.1
+# Local Wiki Skill v1.2.0
 
 Zero-dependency local wiki management for Claude Code. Pure Python, pure files — no Git, no network, just Python 3.9+.
 
@@ -21,12 +21,21 @@ Copies this `SKILL.md` and `wiki.py` into your project's `.claude/` directory.
 ```
 local-wiki-skill/
 ├── SKILL.md           # Claude Code skill definition (this file)
-├── AGENTS.md           # Copilot / Cursor / Windsurf / OpenClaw instructions
+├── platform-adapters/
+│   └── AGENTS.md      # Copilot / Cursor / Windsurf / OpenClaw instructions
 └── scripts/
-    └── wiki.py        # Python CLI — all commands in one file
+    ├── wiki.py         # CLI entry point — thin dispatcher
+    └── wiki_core/      # Core package
+        ├── __init__.py # Constants and version
+        ├── helpers.py  # Shared utilities
+        ├── templates.py # Template generators
+        ├── cmd_init.py # init, sync, bootstrap, install
+        ├── cmd_query.py # list, index, search, backlinks, tags, stats
+        ├── cmd_health.py # health, orphans, trace, fix, rename
+        └── cmd_ingest.py # ingest (URL, file, template)
 ```
 
-`python scripts/wiki.py install <project>` copies all three files to the right places for each tool.
+`python scripts/wiki.py install <project>` copies all files to the right places for each tool.
 
 ## CLI Commands
 
@@ -45,10 +54,10 @@ local-wiki-skill/
 | `python scripts/wiki.py fix [path]` | Auto-fix broken links and normalize naming |
 | `python scripts/wiki.py index [path]` | Generate JSON index for frontend |
 | `python scripts/wiki.py rename <old> <new> [path]` | Rename document and update all wikilinks |
+| `python scripts/wiki.py archive <page> [path]` | Archive document to `_archive/` directory |
 | `python scripts/wiki.py tags [path]` | List all tags with counts and documents |
 | `python scripts/wiki.py stats [path]` | Knowledge base statistics overview |
-| `python scripts/wiki.py wps-auth` | WPS OAuth authorization (first-time setup) |
-| `python scripts/wiki.py import [path]` | Batch import WPS cloud documents |
+| `python scripts/wiki.py ingest [path]` | Ingest external source (URL, file, or template) |
 
 ## Quick Check
 
@@ -151,15 +160,35 @@ Output includes: orphan document list with suggestions for linking them into the
 /wiki health [path] [--format table|json] [--pretty]
 ```
 
-Run a comprehensive health check on the wiki. Checks for:
+Run a comprehensive health check on the wiki. Two categories of checks:
 
+**结构检查 (Structural):**
 - **Orphan documents** — no inbound `[[wikilinks]]`
 - **Broken links** — `[[wikilinks]]` pointing to non-existent pages
 - **Untagged documents** — missing frontmatter `tags`
 - **Low-link documents** — fewer than 2 outbound `[[wikilinks]]`
 - **Empty documents** — content under 50 bytes (stub/placeholder pages)
 - **Self-referential links** — `[[wikilinks]]` pointing to the document itself
-- **Custom checks** — user-defined external commands from SCHEMA.md
+
+**内容质量 (Content Quality):**
+- **Frontmatter 校验** — 必填字段（title/created/updated/type/tags/sources）、type 有效性、日期格式、标签是否在 SCHEMA.md 体系中
+- **Index 完整性** — 检查所有 wiki 页面是否出现在 index.md 中
+- **过期内容检测** — 找出超过 90 天未更新的页面
+- **日志轮转** — 检查 log.md 是否超过 500 条记录
+- **矛盾检测** — 找出共享标签/实体的页面，标记为潜在矛盾供人工审查
+
+**Frontmatter 必填字段：**
+
+```yaml
+---
+title: Page Title        # 必填
+created: 2026-05-22      # 必填，YYYY-MM-DD
+updated: 2026-05-22      # 必填，YYYY-MM-DD
+type: entity             # 必填，entity|concept|comparison|query|summary
+tags: [tech, AI]         # 必填，必须在 SCHEMA.md 标签体系中
+sources: [raw/source.md] # 必填，指向 raw/ 源文件
+---
+```
 
 **Configurable weights:** Add a `## 健康检查` section with a YAML block to SCHEMA.md:
 
@@ -264,6 +293,49 @@ Rename a document and globally update all `[[wikilink]]` references pointing to 
 
 Default mode is dry-run: shows what would change without making modifications.
 
+## /wiki archive
+
+```
+/wiki archive <page> [path] [--apply] [--format table|json] [--pretty]
+```
+
+Archive a document to `_archive/` directory, preserving the original category structure.
+
+**Actions (in order):**
+1. Update all `[[wikilinks]]` in other documents → plain text + "（已归档）"
+2. Remove the page from `index.md` (if present)
+3. Move the file to `_archive/<category>/<filename>.md`
+4. Log the archive action in `log.md`
+
+**Options:**
+- `--apply` — actually perform the archive (default is dry-run preview)
+- `--format json` — output as JSON (with `--pretty` for indentation)
+
+Default mode is dry-run: shows what would change without making modifications.
+
+**Example:**
+```bash
+# Preview what will happen
+python scripts/wiki.py archive transformer-architecture
+
+# Execute the archive
+python scripts/wiki.py archive transformer-architecture --apply
+```
+
+**Archive structure:**
+```
+wiki/
+├── _archive/
+│   ├── concepts/
+│   │   └── old-page.md
+│   ├── entities/
+│   │   └── deprecated-entity.md
+│   └── ...
+├── concepts/
+│   └── active-page.md
+└── ...
+```
+
 ## /wiki tags
 
 ```
@@ -293,103 +365,219 @@ Knowledge base overview statistics.
 - Total file size
 - Latest modification timestamp
 
-## /wiki wps-auth
+### Full Query Workflow (CLI + Agent)
+
+The CLI provides **structural search** (keyword matching). The agent performs **semantic synthesis** (understanding, reasoning, filing):
 
 ```
-/wiki wps-auth
+用户: wiki 里关于 Transformer 和注意力机制有哪些内容？
+
+┌─────────────────────────────────────────────────────────────┐
+│ Step 1: CLI — 结构层（search / list / backlinks）            │
+│   ✅ search "transformer" → 匹配的文档和行号                  │
+│   ✅ search "attention" → 匹配的文档和行号                     │
+│   ✅ backlinks transformer-architecture → 谁引用了这个页面      │
+│   ✅ list --tags AI → 相关标签下的文档                         │
+└─────────────────────────────────────────────────────────────┘
+         ↓ CLI 输出 JSON（含匹配文档、行号、上下文）
+┌─────────────────────────────────────────────────────────────┐
+│ Step 2: Agent — 语义层（大模型能力）                           │
+│   1. 读取 CLI 返回的相关文档全文                               │
+│   2. 理解用户问题的意图                                       │
+│   3. 从多个文档中综合提取答案                                  │
+│   4. 引用具体 wiki 页面作为来源                                │
+│      "基于 [[transformer-architecture]] 和                    │
+│       [[attention-mechanism]]，Transformer 的核心是..."       │
+│   5. 判断答案是否有长期价值                                    │
+│      → 有：创建 queries/ 或 comparisons/ 页面回写              │
+│      → 无：直接回答，不写文件                                   │
+│   6. 更新 log.md                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-One-time WPS OAuth authorization. Opens a browser for the user to authorize the app, then saves the token locally for subsequent API calls.
+**Agent 查询步骤：**
 
-**Prerequisites:**
-Create `scripts/wps_config.json` with your WPS Open Platform app credentials:
+1. **定位相关页面** — 调用 `search` 搜索关键词，调用 `list --tags` 按标签过滤，调用 `backlinks` 找关联页面
+2. **读取页面内容** — 读取匹配文档的全文，理解上下文
+3. **综合回答** — 从多个来源中提取、整合、推理，形成完整答案
+4. **引用来源** — 答文中用 `[[wikilinks]]` 引用 wiki 页面，可溯源
+5. **回写有价值的内容** — 如果答案是深度分析、对比、或综合研究，创建新页面保存：
+   - `queries/<topic>.md` — 查询结果、分析报告
+   - `comparisons/<a>-vs-<b>.md` — 对比分析
+   - 更新 `log.md` 记录查询和回写
 
+**回写判断标准：**
+| 情况 | 操作 |
+|------|------|
+| 简单事实查询（"X 是什么"） | 直接回答，不写文件 |
+| 多文档综合分析 | 回写到 `queries/` |
+| 对比类查询（"X 和 Y 的区别"） | 回写到 `relations/` |
+| 深度研究（涉及 5+ 页面） | 回写到 `queries/`，附带完整引用 |
+
+### Agent 查询示例
+
+```
+用户: RAG 和微调哪个更适合我们的场景？
+
+Agent:
+  1. search "RAG" → 找到 concepts/rag.md, queries/rag-performance.md
+  2. search "fine-tuning" → 找到 concepts/fine-tuning.md
+  3. list --tags optimization → 找到 concepts/model-optimization.md
+  4. 读取这 4 个页面全文
+  5. 综合分析，给出对比建议
+  6. 回写: relations/rag-vs-fine-tuning.md（含对比表格和结论）
+  7. 更新 log.md
+```
+
+## /wiki ingest
+
+```
+/wiki ingest [path] [--url URL | --file FILE | --template TITLE] [--category CAT] [--tags TAG1,TAG2] [--format table|json] [--pretty]
+```
+
+Ingest external sources into the wiki. Three modes:
+
+**URL mode** (`--url`):
+Fetch a URL, extract text content, save to `raw/` with source metadata header.
+
+```bash
+python scripts/wiki.py ingest . --url https://example.com/article
+```
+
+**File mode** (`--file`):
+Copy a local file into `raw/` with normalized filename.
+
+```bash
+python scripts/wiki.py ingest . --file /path/to/document.md
+```
+
+**Template mode** (`--template`):
+Create a wiki page template with proper frontmatter.
+
+```bash
+python scripts/wiki.py ingest . --template "AI Agent" --category concepts --tags AI,tech
+```
+
+**Bulk mode** (`--manifest`):
+Process multiple sources from a JSON manifest file.
+
+```bash
+python scripts/wiki.py ingest . --manifest sources.json
+```
+
+Manifest format:
 ```json
 {
-  "app_id": "your_app_id",
-  "app_secret": "your_app_secret",
-  "redirect_uri": "http://localhost:8899/callback"
-}
-```
-
-**How it works:**
-1. Reads app credentials from `wps_config.json`
-2. Opens browser to WPS authorization page
-3. Starts a local HTTP server to receive the callback
-4. Exchanges the authorization code for an access token
-5. Saves token to `wps_token.json` (auto-refreshes when expired)
-
-## /wiki import
-
-```
-/wiki import [path] [--wps-folder URL] [--wps-file URL] [--manifest FILE] [--stdin] [OPTIONS]
-```
-
-Batch import WPS cloud documents into the wiki. Supports three input sources:
-
-**Input sources (pick one):**
-- `--wps-folder <url>` — Import all files from a WPS folder (auto-traverses subfolders)
-- `--wps-file <url>` — Import a single WPS cloud document
-- `--manifest <file>` — Import from a JSON manifest file
-- `--stdin` — Read JSON manifest from stdin
-
-**Options:**
-- `--category CAT` — Force classification (overrides auto-classification)
-- `--tags TAG1,TAG2` — Additional tags
-- `--dry-run` — Preview mode (no files written)
-- `--force` / `-y` — Skip confirmation, import directly
-- `--skip-existing` — Skip files already imported (tracked by wps_file_id in SCHEMA.md)
-- `--format table|json` — Output format
-- `--pretty` — JSON indentation
-
-**Import flow:**
-1. Parse input source (folder URL / file URL / JSON manifest)
-2. For folders: traverse all files, show scope summary (file count, type breakdown)
-3. Wait for user confirmation (unless `--force` or `-y`)
-4. For each file:
-   - Skip if already indexed (`--skip-existing`)
-   - Extract content via WPS API (`markdown` format)
-   - Auto-classify: `raw/` (default), `entities/`, `concepts/`, `relations/`
-   - Auto-generate tags from title and path keywords
-   - Generate normalized filename (lowercase, hyphens)
-   - Write wiki page with frontmatter (title, tags, source URL, wps_file_id)
-5. Update SCHEMA.md `## 已索引文件` section for incremental tracking
-6. Append import log to `log.md`
-
-**Auto-classification rules:**
-
-| Title/Path keywords | Category |
-|---------------------|----------|
-| 会议, 周报, 日报, 纪要 | `raw/` |
-| 团队, 人员, 成员 | `entities/` |
-| 概念, 方案, 设计, spec, 架构 | `concepts/` |
-| Other | `raw/` (default) |
-
-**JSON manifest format:**
-
-```json
-{
-  "documents": [
-    {
-      "id": "wps_file_id",
-      "title": "Document Title",
-      "content": "Full text content (markdown)",
-      "url": "https://www.kdocs.cn/xxx",
-      "author": "Author Name",
-      "date": "2025-01-15",
-      "type": "doc|sheet|ppt|pdf",
-      "tags": ["AI", "design"],
-      "category": "",
-      "path_hint": "/Team Docs/AI Project/"
-    }
+  "sources": [
+    {"type": "url", "url": "https://example.com/article1"},
+    {"type": "url", "url": "https://example.com/article2"},
+    {"type": "file", "path": "/path/to/document.md"},
+    {"type": "template", "title": "My Page", "category": "concepts", "tags": ["AI"]}
   ]
 }
 ```
 
-Only `id` and `title` are required. `content` can be empty (creates a stub page).
+**Options:**
+- `--format json` — output as JSON
+- `--pretty` — JSON indentation
+- `--category` — category for template mode (default: drafts)
+- `--tags` — comma-separated tags for template mode
+- `--manifest` — JSON manifest file for bulk ingest
 
-**Incremental updates:**
-Imported files are tracked in SCHEMA.md under `## 已索引文件` with their `wps_file_id`. Use `--skip-existing` to only import new files on subsequent runs.
+### Full Ingest Workflow (CLI + Agent)
+
+The `ingest` CLI command handles **structural operations** (save file, update log). After that, the agent performs **knowledge extraction and multi-layer content generation**:
+
+```
+用户: /wiki ingest . --url https://example.com/article
+
+┌─────────────────────────────────────────────────────────────┐
+│ Step 1: CLI — 结构层（wiki.py ingest）                       │
+│   ✅ 抓取 URL 内容                                           │
+│   ✅ 保存到 raw/example-article.md（带源信息头）               │
+│   ✅ 提取关键词，建议相关页面                                   │
+│   ✅ 更新 log.md                                             │
+└─────────────────────────────────────────────────────────────┘
+         ↓ CLI 输出 JSON（含 title, keywords, related_pages）
+┌─────────────────────────────────────────────────────────────┐
+│ Step 2: Agent — 知识提取层（大模型能力）                       │
+│   1. 读取 raw/example-article.md 全文                        │
+│   2. 分析内容，提取：                                         │
+│      - 实体（人、组织、产品、模型）                             │
+│      - 概念（术语、方法论、技术原理）                           │
+│      - 关系（依赖、对比、实现）                                │
+│   3. 检查现有 wiki 页面，避免重复                              │
+│   4. 为每个实体/概念创建 wiki 页面：                           │
+│      - entities/openai.md                                    │
+│      - entities/sam-altman.md                                │
+│      - concepts/transformer-architecture.md                  │
+│      - concepts/attention-mechanism.md                       │
+│      - relations/transformer-vs-rnn.md                       │
+│   5. 每个页面包含：                                          │
+│      - YAML frontmatter（title, created, updated, type,      │
+│        tags, sources 指向 raw/ 源文件）                       │
+│      - 结构化内容（概述、要点、引用）                           │
+│      - [[wikilinks]] 交叉引用（≥2 条出站链接）                │
+│   6. 更新 log.md 记录所有创建/更新的页面                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Agent 后处理步骤：**
+
+1. **读取源文件** — 读 `raw/` 中刚保存的完整内容
+2. **实体提取** — 识别文中提到的人、组织、产品、模型等，每个创建 `entities/<name>.md`
+3. **概念提取** — 识别技术术语、方法论、原理，每个创建 `concepts/<name>.md`
+4. **关系提取** — 识别对比、依赖、实现等关系，创建 `relations/<a>-vs-<b>.md`
+5. **交叉引用** — 确保每个新页面有 ≥2 条 `[[wikilinks]]`，并检查已有页面是否需要反向链接
+6. **更新索引** — 将新页面加入 `index.md`（如有）或生成 `queries/index.json`
+7. **记录日志** — 在 `log.md` 中记录所有创建/更新操作
+
+**一个源文件通常触发 5-15 个 wiki 页面的创建/更新** — 这是知识库的复利效应。
+
+### Agent 调用示例
+
+```
+用户: 帮我把这篇论文的知识提取到 wiki 里
+      https://arxiv.org/abs/2301.00001
+
+Agent:
+  1. 调用 CLI 保存源文件
+     → python wiki.py ingest . --url https://arxiv.org/abs/2301.00001
+  2. 读取 raw/arxiv-2301-00001.md
+  3. 分析内容，识别出 3 个实体、2 个概念、1 个关系
+  4. 创建 6 个 wiki 页面（带 frontmatter 和交叉引用）
+  5. 更新 log.md
+  6. 汇报：创建了 entities/xxx.md, concepts/yyy.md 等
+```
+
+### Page Type Mapping
+
+| 提取内容 | 目录 | type 字段 | 示例 |
+|---------|------|----------|------|
+| 人、组织、产品、模型 | `entities/` | `entity` | entities/openai.md |
+| 术语、方法论、技术原理 | `concepts/` | `concept` | concepts/attention-mechanism.md |
+| 对比、竞品分析 | `relations/` | `comparison` | relations/transformer-vs-rnn.md |
+| 查询结果、分析报告 | `queries/` | `query` | queries/rag-vs-fine-tuning.md |
+| 草稿、临时笔记 | `drafts/` | `summary` | drafts/todo-notes.md |
+
+### Frontmatter 标准
+
+每个自动生成的页面必须包含完整 frontmatter：
+
+```yaml
+---
+title: Page Title
+created: 2026-05-22
+updated: 2026-05-22
+type: entity | concept | comparison | query | summary
+tags: [tech, AI, ...]
+sources: [raw/example-article.md]
+---
+```
+
+- `sources` 必须指向 `raw/` 中的源文件（溯源）
+- `tags` 必须来自 SCHEMA.md 中定义的标签体系
+- 每次更新页面时 `updated` 日期必须更新
 
 ## Conventions
 

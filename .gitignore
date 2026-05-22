@@ -17,3 +17,4 @@ Thumbs.db
 
 # 缓存
 build/local-wiki-skill/scripts/__pycache__/*
+build/local-wiki-skill/scripts/wiki_core/__pycache__/*

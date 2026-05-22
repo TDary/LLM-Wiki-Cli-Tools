@@ -1,0 +1,328 @@
+"""Commands: list, index, search, backlinks, tags, stats."""
+
+import argparse
+import json
+import re
+from datetime import datetime
+from pathlib import Path
+
+from . import DIRS, CATEGORY_LABELS, SYSTEM_FILES
+from .helpers import (
+    expand, require_wiki, now, collect_documents, read_schema_meta,
+    search_documents, build_backlink_map, _strip_internal,
+)
+
+
+def cmd_list(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    docs = collect_documents(path)
+
+    if hasattr(args, "category") and args.category:
+        docs = [d for d in docs if d["category"] == args.category]
+    elif not getattr(args, "include_raw", False):
+        docs = [d for d in docs if d["category"] != "raw"]
+
+    if hasattr(args, "tags") and args.tags:
+        filter_tags = {t.strip().lower() for t in args.tags.split(",") if t.strip()}
+        docs = [d for d in docs if filter_tags & {t.lower() for t in d.get("tags", [])}]
+
+    if args.format == "json":
+        meta = read_schema_meta(path)
+        output = {
+            "wiki": meta,
+            "total": len(docs),
+            "documents": _strip_internal(docs),
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if getattr(args, "pretty", False) else None))
+        return
+
+    meta = read_schema_meta(path)
+    print(f"\n📚 {meta['name']} — {meta['domain']}")
+    print(f"   共 {len(docs)} 篇文档\n")
+
+    current_cat = None
+    for d in docs:
+        if d["category"] != current_cat:
+            current_cat = d["category"]
+            print(f"  [{d['category_label']}] ({d['category']}/)")
+        tags_str = f" [{', '.join(d['tags'])}]" if d["tags"] else ""
+        links_str = f"  🔗{d['links_count']}" if d["links_count"] > 0 else ""
+        readonly = "  🔒只读" if d["category"] == "raw" else ""
+        print(f"    {d['title']}")
+        print(f"    ├─ {d['file']}  ({d['size']}B, {d['modified']}){tags_str}{links_str}{readonly}")
+        print()
+
+
+def cmd_index(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    docs = collect_documents(path)
+    meta = read_schema_meta(path)
+
+    by_category = {}
+    for d in docs:
+        cat = d["category"]
+        if cat not in by_category:
+            by_category[cat] = {
+                "category": cat,
+                "category_label": d["category_label"],
+                "count": 0,
+                "documents": [],
+            }
+        by_category[cat]["count"] += 1
+        by_category[cat]["documents"].append({k: v for k, v in d.items() if not k.startswith("_")})
+
+    all_tags = set()
+    for d in docs:
+        for t in d.get("tags", []):
+            all_tags.add(t)
+
+    index = {
+        "wiki": meta,
+        "generated_at": now(),
+        "total_documents": len(docs),
+        "categories": [by_category[k] for k in DIRS if k in by_category],
+        "tags": sorted(all_tags),
+    }
+
+    output_path = expand(args.output or str(path / "queries" / "index.json"))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    indent = 2 if args.pretty else None
+    output_path.write_text(json.dumps(index, ensure_ascii=False, indent=indent), encoding="utf-8")
+
+    print(f"✅ 索引已生成: {output_path}")
+    print(f"   文档总数: {len(docs)}")
+    print(f"   分类数: {len(by_category)}")
+    print(f"   标签: {', '.join(sorted(all_tags)) if all_tags else '无'}")
+
+
+def cmd_search(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    docs = collect_documents(path)
+
+    if getattr(args, "no_raw", False):
+        docs = [d for d in docs if d["category"] != "raw"]
+
+    if getattr(args, "regex", False):
+        results = search_documents(docs, args.keyword, regex=True)
+    else:
+        results = search_documents(docs, args.keyword)
+
+    if args.format == "json":
+        meta = read_schema_meta(path)
+        output = {
+            "wiki": meta,
+            "keyword": args.keyword,
+            "total": len(results),
+            "results": results,
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    print(f"\n🔍 搜索: \"{args.keyword}\"")
+    print(f"   匹配文档: {len(results)} 篇\n")
+    for r in results:
+        print(f"  📄 {r['title']}")
+        print(f"     {r['file']}  ({r['category']})")
+        for m in r["matches"][:5]:
+            prefix = f"L{m['line']}" if m["line"] > 0 else "标题"
+            content = m["content"]
+            if len(content) > 80:
+                content = content[:77] + "..."
+            print(f"     {prefix}: {content}")
+        if len(r["matches"]) > 5:
+            print(f"     ... 共 {r['match_count']} 处匹配")
+        print()
+
+
+def cmd_backlinks(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    page = args.page
+    if page.endswith(".md"):
+        page = page[:-3]
+    target_stem = page.strip().lower().replace(" ", "-")
+
+    backlinks = build_backlink_map(path)
+    refs = backlinks.get(target_stem, [])
+
+    if args.format == "json":
+        meta = read_schema_meta(path)
+        output = {
+            "wiki": meta,
+            "page": args.page,
+            "total": len(refs),
+            "backlinks": refs,
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    print(f"\n🔗 反向链接: [[{page}]]")
+    print(f"   被引用次数: {len(refs)}\n")
+    if not refs:
+        print("   没有找到引用此页面的文档。")
+    else:
+        for ref in refs:
+            print(f"  📄 {ref['source_title']}")
+            print(f"     {ref['source_file']}  (L{ref['line']})")
+            content = ref["line_content"]
+            if len(content) > 80:
+                content = content[:77] + "..."
+            print(f"     {content}")
+            print()
+
+
+def cmd_tags(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    docs = collect_documents(path)
+
+    tag_map: dict[str, dict] = {}
+    for d in docs:
+        if d["category"] == "raw":
+            continue
+        for t in d.get("tags", []):
+            t = t.strip()
+            if not t:
+                continue
+            if t not in tag_map:
+                tag_map[t] = {"tag": t, "count": 0, "documents": []}
+            tag_map[t]["count"] += 1
+            tag_map[t]["documents"].append(d["file"])
+
+    tags = list(tag_map.values())
+
+    sort_by = getattr(args, "sort", "count")
+    if sort_by == "name":
+        tags.sort(key=lambda t: t["tag"].lower())
+    else:
+        tags.sort(key=lambda t: (-t["count"], t["tag"].lower()))
+
+    if args.format == "json":
+        meta = read_schema_meta(path)
+        output = {
+            "wiki": meta,
+            "total": len(tags),
+            "tags": tags,
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    meta = read_schema_meta(path)
+    print(f"\n🏷️  {meta['name']} — 标签列表")
+    print(f"   共 {len(tags)} 个标签\n")
+
+    if not tags:
+        print("   没有找到标签。")
+        return
+
+    for t in tags:
+        example = ""
+        if t["documents"]:
+            example = t["documents"][0]
+            if len(t["documents"]) > 1:
+                example += f" 等 {len(t['documents'])} 篇"
+        print(f"   {t['tag']:<20}  {t['count']:>3} 次  {example}")
+
+
+def cmd_stats(args: argparse.Namespace) -> None:
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    docs = collect_documents(path)
+    backlinks = build_backlink_map(path)
+
+    cat_count: dict[str, int] = {}
+    for d in docs:
+        cat_count[d["category"]] = cat_count.get(d["category"], 0) + 1
+
+    tag_count: dict[str, int] = {}
+    total_tags = 0
+    for d in docs:
+        for t in d.get("tags", []):
+            t = t.strip()
+            if t:
+                tag_count[t] = tag_count.get(t, 0) + 1
+                total_tags += 1
+
+    total_links = sum(d["links_count"] for d in docs)
+    link_density = total_links / len(docs) if docs else 0.0
+
+    orphan_count = 0
+    for d in docs:
+        if d["category"] == "raw":
+            continue
+        stem = Path(d["file"]).stem.lower()
+        if stem in SYSTEM_FILES:
+            continue
+        if stem not in backlinks or len(backlinks[stem]) == 0:
+            orphan_count += 1
+
+    total_size = 0
+    latest_mod = ""
+    for d in docs:
+        total_size += d["size"]
+        if d["modified"] > latest_mod:
+            latest_mod = d["modified"]
+
+    unique_tags = len(tag_count)
+
+    if args.format == "json":
+        meta = read_schema_meta(path)
+        cat_breakdown = {}
+        for cat, count in cat_count.items():
+            cat_breakdown[cat] = {
+                "label": CATEGORY_LABELS.get(cat, cat),
+                "count": count,
+            }
+        output = {
+            "wiki": meta,
+            "total_documents": len(docs),
+            "categories": cat_breakdown,
+            "unique_tags": unique_tags,
+            "total_tag_uses": total_tags,
+            "link_density": link_density,
+            "orphan_count": orphan_count,
+            "total_size_bytes": total_size,
+            "latest_modified": latest_mod,
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    meta = read_schema_meta(path)
+    print(f"\n📊 {meta['name']} — 知识库统计")
+    print(f"\n   文档总数: {len(docs)}")
+    for cat in DIRS:
+        count = cat_count.get(cat, 0)
+        if count > 0:
+            print(f"     {CATEGORY_LABELS.get(cat, cat) + '/':<12} {count} 篇")
+
+    print(f"\n   标签统计:")
+    print(f"     唯一标签: {unique_tags}")
+    print(f"     标签使用: {total_tags} 次")
+
+    print(f"\n   链接密度: {link_density:.1f} 条/文档")
+    print(f"   孤立文档: {orphan_count} 篇", end="")
+    if docs:
+        print(f" ({orphan_count * 100 / len(docs):.0f}%)")
+    else:
+        print()
+
+    print(f"   总文件大小: {total_size} 字节", end="")
+    if total_size > 1024 * 1024:
+        print(f" ({total_size / 1024 / 1024:.1f} MB)")
+    elif total_size > 1024:
+        print(f" ({total_size / 1024:.1f} KB)")
+    else:
+        print()
+
+    if latest_mod:
+        print(f"   最近修改: {latest_mod}")
