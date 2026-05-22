@@ -204,7 +204,7 @@ title: Page Title        # 必填
 created: 2026-05-22      # 必填，YYYY-MM-DD
 updated: 2026-05-22      # 必填，YYYY-MM-DD
 type: entity             # 必填，entity|concept|comparison|query|summary
-tags: [tech, AI]         # 必填，必须在 SCHEMA.md 标签体系中
+tags: [tech, AI]         # 必填，必须在 SCHEMA.md 标签体系中（人工审核）
 sources: [raw/source.md] # 必填，指向 raw/ 源文件
 ---
 ```
@@ -242,7 +242,7 @@ Output includes a health score (0-100) and actionable suggestions.
 ☐ 已逐项处理每个问题类别
 ☐ 断链 → 已运行 fix --apply
 ☐ 孤立文档 → 已添加 [[wikilink]] 关联
-☐ 无标签页面 → 已补充 frontmatter tags
+☐ 无标签页面 → 已向用户建议标签，等待确认后补充
 ☐ 过期内容 → 已标记或更新
 ☐ 已更新 log.md
 ```
@@ -720,7 +720,7 @@ sources: [raw/example-article.md]
 ```
 
 - `sources` 必须指向 `raw/` 中的源文件（溯源）
-- `tags` 必须来自 SCHEMA.md 中定义的标签体系
+- `tags` 必须来自 SCHEMA.md 中定义的标签体系。**Agent 不可自行创建新标签**，只能使用已有标签。如需新增标签，必须向用户提出建议并等待确认后才能写入 SCHEMA.md 和页面 frontmatter。
 - 每次更新页面时 `updated` 日期必须更新
 
 ## Conventions
@@ -735,6 +735,7 @@ When reading/writing wiki pages:
 6. **Read first**: before writing, check `SCHEMA.md`, `README.md`, and recent `log.md`
 7. **No skip rule**: Agent 必须完成 workflow 中的所有步骤。CLI 执行成功 ≠ 任务完成。知识提取、交叉引用、日志更新是强制步骤。
 8. **New page rule**: 创建任何新 wiki 页面时，以下 4 项缺一不可：① 完整 frontmatter（title/created/updated/type/tags/sources）② ≥2 条 `[[wikilinks]]` 出站链接 ③ 更新 `log.md` ④ 更新 `index.md`（如有）或重新生成 `queries/index.json`
+9. **Tag review**: 标签体系需人工审核。Agent 只能使用 SCHEMA.md 中已有的标签，不可自行创建新标签。如需新增，向用户提出建议并等待确认。
 
 ## Wiki Structure
 

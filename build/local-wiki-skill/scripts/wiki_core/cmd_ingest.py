@@ -199,7 +199,7 @@ def _suggest_related(wiki_path: Path, keywords: list[str]) -> list[dict]:
             if kw in tags_lower:
                 score += 2
             # Check body content (first 500 chars)
-            body = doc.get("_text") or ""[:500].lower()
+            body = (doc.get("_text") or "")[:500].lower()
             if kw in body:
                 score += 1
 
