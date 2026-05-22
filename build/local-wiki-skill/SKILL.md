@@ -1,6 +1,6 @@
 ---
 name: wiki
-version: 1.2.0
+version: 1.2.1
 description: 创建、查询和管理本地知识库，纯文件模式，零依赖
 ---
 
@@ -36,6 +36,23 @@ local-wiki-skill/
 ```
 
 `python scripts/wiki.py install <project>` copies all files to the right places for each tool.
+
+## Agent 触发规则（强制）
+
+> 以下规则不可跳过。Agent 看到触发条件时，必须执行对应动作。
+
+| 触发条件 | 强制动作 |
+|---------|---------|
+| `ingest --url` 或 `ingest --file` 执行成功 | 立即读取 raw/ 中的源文件，执行知识提取（见"Full Ingest Workflow"） |
+| `ingest --manifest` 批量执行成功 | 对每个成功摄入的源文件，逐一执行知识提取 |
+| `health` 检查发现断链 | 立即运行 `fix --apply` 修复 |
+| `health` 检查发现孤立文档 | 为每个孤立文档建立至少 1 条 `[[wikilink]]` 关联 |
+| `search` 返回结果且用户问题需要综合分析 | 读取匹配文档全文，综合回答后判断是否回写 |
+| `rename` 执行成功 | 验证所有 wikilinks 已更新，检查 index.md 是否同步，更新 log.md |
+| `archive` 执行成功 | 验证 index.md 中已移除该页面，检查是否有上下文引用需要更新（如 query 页面），更新 log.md |
+| `fix --apply` 执行成功 | 向用户报告修复详情（哪些链接被改了），验证修复结果，更新 log.md |
+
+**违反以上任何一条 = 任务未完成。**
 
 ## CLI Commands
 
@@ -216,6 +233,20 @@ Each custom check runs with a 5-second timeout. stdout lines become issue items.
 
 Output includes a health score (0-100) and actionable suggestions.
 
+**健康检查后 Checklist（Agent 必须逐项确认）：**
+
+```
+☐ 已运行 health 获取完整检查报告
+☐ 已逐项处理每个问题类别
+☐ 断链 → 已运行 fix --apply
+☐ 孤立文档 → 已添加 [[wikilink]] 关联
+☐ 无标签页面 → 已补充 frontmatter tags
+☐ 过期内容 → 已标记或更新
+☐ 已更新 log.md
+```
+
+**跳过任何一项 = 任务未完成。**
+
 ## /wiki fix
 
 ```
@@ -234,6 +265,14 @@ Structural self-healing: detect and auto-fix broken wikilinks and naming inconsi
 - `--format json` — output as JSON (with `--pretty` for indentation)
 
 Default mode is dry-run: shows what would be fixed without making changes.
+
+**fix --apply 后验证 Checklist：**
+
+```
+☐ 已向用户报告修复详情（哪些链接被改了，从什么改为什么）
+☐ 已确认无误修复（未引入新的断链）
+☐ 已更新 log.md
+```
 
 ## /wiki trace
 
@@ -293,6 +332,16 @@ Rename a document and globally update all `[[wikilink]]` references pointing to 
 
 Default mode is dry-run: shows what would change without making modifications.
 
+**rename 后验证 Checklist：**
+
+```
+☐ 已确认所有 [[wikilinks]] 已从旧名更新为新名
+☐ 已确认文档内 # heading 已更新
+☐ 已确认文件已重命名
+☐ 已确认 index.md（如有）已同步
+☐ 已更新 log.md
+```
+
 ## /wiki archive
 
 ```
@@ -336,6 +385,16 @@ wiki/
 └── ...
 ```
 
+**archive 后验证 Checklist：**
+
+```
+☐ 已确认所有引用该页面的 [[wikilinks]] 已更新为纯文本 + "（已归档）"
+☐ 已确认 index.md 中已移除该页面
+☐ 已确认文件已移至 _archive/ 目录
+☐ 已检查是否有 query/relations 页面引用了归档内容，需要更新上下文
+☐ 已更新 log.md
+```
+
 ## /wiki tags
 
 ```
@@ -366,6 +425,19 @@ Knowledge base overview statistics.
 - Latest modification timestamp
 
 ### Full Query Workflow (CLI + Agent)
+
+**执行前 Checklist（Agent 必须逐项确认）：**
+
+```
+☐ 已调用 search/list/backlinks 定位相关页面
+☐ 已读取匹配文档的全文
+☐ 已综合多个来源给出完整答案
+☐ 已在答案中用 [[wikilinks]] 引用来源
+☐ 已判断答案是否有长期价值（是→回写，否→直接回答）
+☐ 已更新 log.md（如有回写）
+```
+
+**跳过任何一项 = 任务未完成。**
 
 The CLI provides **structural search** (keyword matching). The agent performs **semantic synthesis** (understanding, reasoning, filing):
 
@@ -486,6 +558,21 @@ Manifest format:
 
 ### Full Ingest Workflow (CLI + Agent)
 
+**执行前 Checklist（Agent 必须逐项确认）：**
+
+```
+☐ CLI 命令已执行，源文件已保存到 raw/
+☐ 已读取 raw/ 中源文件的完整内容
+☐ 已识别实体（人/组织/产品/模型）
+☐ 已识别概念（术语/方法论/技术原理）
+☐ 已识别关系（对比/依赖/实现）
+☐ 已检查现有 wiki 页面，避免重复
+☐ 已为每个提取项创建 wiki 页面（含 frontmatter + wikilinks）
+☐ 已更新 log.md
+```
+
+**跳过任何一项 = 任务未完成。**
+
 The `ingest` CLI command handles **structural operations** (save file, update log). After that, the agent performs **knowledge extraction and multi-layer content generation**:
 
 ```
@@ -589,6 +676,8 @@ When reading/writing wiki pages:
 4. **Raw is immutable**: NEVER modify, rename, or delete files in `raw/`. Corrections and interpretations go in wiki pages under other directories.
 5. **Always log**: append to `log.md` after every action
 6. **Read first**: before writing, check `SCHEMA.md`, `README.md`, and recent `log.md`
+7. **No skip rule**: Agent 必须完成 workflow 中的所有步骤。CLI 执行成功 ≠ 任务完成。知识提取、交叉引用、日志更新是强制步骤。
+8. **New page rule**: 创建任何新 wiki 页面时，以下 4 项缺一不可：① 完整 frontmatter（title/created/updated/type/tags/sources）② ≥2 条 `[[wikilinks]]` 出站链接 ③ 更新 `log.md` ④ 更新 `index.md`（如有）
 
 ## Wiki Structure
 
