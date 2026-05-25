@@ -1215,6 +1215,21 @@ class TestSSRFProtection:
         assert _MAX_RESPONSE_BYTES > 0
         assert _MAX_RESPONSE_BYTES <= 100 * 1024 * 1024  # max 100MB
 
+    def test_redirect_handler_class_exists(self):
+        """Verify the SSRF-safe redirect handler is defined and used."""
+        from wiki_core.cmd_ingest import _SSRFSafeRedirectHandler
+        from urllib.request import HTTPRedirectHandler
+        assert issubclass(_SSRFSafeRedirectHandler, HTTPRedirectHandler)
+
+    def test_redirect_handler_validates_target(self):
+        """Redirect to a private IP should be rejected by the handler."""
+        from wiki_core.cmd_ingest import _SSRFSafeRedirectHandler, _validate_url
+        handler = _SSRFSafeRedirectHandler()
+        with pytest.raises(ValueError, match="内网|保留|解析"):
+            handler.redirect_request(
+                None, None, 302, "Found", {}, "http://127.0.0.1/admin"
+            )
+
 
 class TestPathTraversalFix:
     """Test path containment checks in index search and manifest ingest."""
@@ -1306,6 +1321,22 @@ class TestReDoSProtection:
         with pytest.raises(SystemExit):
             search_documents(docs, "(a+)+$", regex=True)
 
+    def test_rejects_alternation_quantifier(self, wiki_dir):
+        """Patterns like (a|a)+ should also be rejected."""
+        _write_page(wiki_dir, "concepts", "a.md", "# A\naaa\n")
+        clear_doc_cache()
+        docs = collect_documents(wiki_dir)
+        with pytest.raises(SystemExit):
+            search_documents(docs, "(a|a)+", regex=True)
+
+    def test_rejects_quantified_group_with_pipe(self, wiki_dir):
+        """Patterns like (a|aa)+b should be rejected."""
+        _write_page(wiki_dir, "concepts", "a.md", "# A\naabb\n")
+        clear_doc_cache()
+        docs = collect_documents(wiki_dir)
+        with pytest.raises(SystemExit):
+            search_documents(docs, "(a|aa)+b", regex=True)
+
     def test_safe_regex_works(self, wiki_dir):
         """Normal regex should still work."""
         _write_page(wiki_dir, "concepts", "a.md", "# Test\nhello world\n")
@@ -1324,6 +1355,7 @@ class TestReDoSProtection:
         """Verify the suspicious pattern detector itself is valid."""
         from wiki_core.helpers import _SUSPICIOUS_RE
         assert _SUSPICIOUS_RE.search("(a+)+") is not None
+        assert _SUSPICIOUS_RE.search("(a|a)+") is not None
         assert _SUSPICIOUS_RE.search("normal") is None
         assert _SUSPICIOUS_RE.search("[a-z]+") is None
 
