@@ -43,6 +43,9 @@ def _validate_url(url: str) -> None:
         addr = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         for family, _, _, _, sockaddr in addr:
             ip = ipaddress.ip_address(sockaddr[0])
+            # Unmap IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1 → 127.0.0.1)
+            if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+                ip = ip.ipv4_mapped
             for net in _PRIVATE_NETWORKS:
                 if ip in net:
                     raise ValueError(f"拒绝访问内网/保留地址: {ip} ({hostname})")
@@ -332,11 +335,12 @@ def _ingest_manifest(wiki_path: Path, args: argparse.Namespace) -> None:
                     errors.append({"index": i, "error": f"文件不存在: {src}"})
                     continue
 
-                # Security: warn when source is outside wiki directory
+                # Security: block source files outside wiki directory
                 try:
                     src.resolve().relative_to(wiki_path.resolve())
                 except ValueError:
-                    print(f"  ⚠️  源文件不在 wiki 目录内: {src}")
+                    errors.append({"index": i, "error": f"源文件不在 wiki 目录内（安全限制）: {src}"})
+                    continue
 
                 print(f"  [{i}/{len(sources)}] 导入: {src}")
 
@@ -536,11 +540,12 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             print(f"❌ 文件不存在: {src}")
             sys.exit(1)
 
-        # Security: warn when source is outside wiki directory
+        # Security: block source files outside wiki directory
         try:
             src.resolve().relative_to(path.resolve())
         except ValueError:
-            print(f"⚠️  源文件不在 wiki 目录内: {src}")
+            print(f"❌ 源文件不在 wiki 目录内（安全限制）: {src}")
+            sys.exit(1)
 
         slug = src.stem.lower().replace(" ", "-")
         slug = re.sub(r"[^\w-]", "-", slug)

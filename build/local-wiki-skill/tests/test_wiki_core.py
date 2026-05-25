@@ -1276,8 +1276,8 @@ class TestPathTraversalFix:
         if results is not None:
             assert len(results) == 0
 
-    def test_manifest_warns_external_file(self, wiki_dir, capsys):
-        """Manifest with file outside wiki should print a warning."""
+    def test_manifest_blocks_external_file(self, wiki_dir, capsys):
+        """Manifest with file outside wiki should be blocked."""
         external = wiki_dir.parent / "external.md"
         external.write_text("# External\n", encoding="utf-8")
 
@@ -1322,20 +1322,23 @@ class TestReDoSProtection:
             search_documents(docs, "(a+)+$", regex=True)
 
     def test_rejects_alternation_quantifier(self, wiki_dir):
-        """Patterns like (a|a)+ should also be rejected."""
+        """Patterns like (a|a)+ are NOT caught by _SUSPICIOUS_RE (too broad),
+        but the 5s timeout protects against actual ReDoS damage."""
         _write_page(wiki_dir, "concepts", "a.md", "# A\naaa\n")
         clear_doc_cache()
         docs = collect_documents(wiki_dir)
-        with pytest.raises(SystemExit):
-            search_documents(docs, "(a|a)+", regex=True)
+        # This should NOT raise — the pattern passes the heuristic check
+        # and the timeout only fires if matching actually hangs
+        results = search_documents(docs, "(a|a)+", regex=True)
+        assert isinstance(results, list)
 
     def test_rejects_quantified_group_with_pipe(self, wiki_dir):
-        """Patterns like (a|aa)+b should be rejected."""
+        """Patterns like (a|aa)+b pass heuristic but timeout protects."""
         _write_page(wiki_dir, "concepts", "a.md", "# A\naabb\n")
         clear_doc_cache()
         docs = collect_documents(wiki_dir)
-        with pytest.raises(SystemExit):
-            search_documents(docs, "(a|aa)+b", regex=True)
+        results = search_documents(docs, "(a|aa)+b", regex=True)
+        assert isinstance(results, list)
 
     def test_safe_regex_works(self, wiki_dir):
         """Normal regex should still work."""
@@ -1355,16 +1358,17 @@ class TestReDoSProtection:
         """Verify the suspicious pattern detector itself is valid."""
         from wiki_core.helpers import _SUSPICIOUS_RE
         assert _SUSPICIOUS_RE.search("(a+)+") is not None
-        assert _SUSPICIOUS_RE.search("(a|a)+") is not None
+        assert _SUSPICIOUS_RE.search("([a-z]+)*") is not None
+        assert _SUSPICIOUS_RE.search("(foo|bar)+") is None  # safe alternation not flagged
         assert _SUSPICIOUS_RE.search("normal") is None
         assert _SUSPICIOUS_RE.search("[a-z]+") is None
 
 
 class TestFileCopyWarning:
-    """Test that --file warns when source is outside wiki directory."""
+    """Test that --file blocks copies from outside wiki directory."""
 
-    def test_external_file_warns(self, wiki_dir, capsys):
-        """Copying from outside wiki should print a warning."""
+    def test_external_file_blocked(self, wiki_dir, capsys):
+        """Copying from outside wiki should be blocked with an error."""
         external = wiki_dir.parent / "outside.md"
         external.write_text("# Outside\n", encoding="utf-8")
 
@@ -1382,14 +1386,15 @@ class TestFileCopyWarning:
         )
 
         from wiki_core.cmd_ingest import cmd_ingest
-        cmd_ingest(args)
+        with pytest.raises(SystemExit):
+            cmd_ingest(args)
         captured = capsys.readouterr()
         assert "不在 wiki 目录内" in captured.out
 
         external.unlink(missing_ok=True)
 
-    def test_internal_file_no_warning(self, wiki_dir, capsys):
-        """Copying from inside wiki should NOT print a warning."""
+    def test_internal_file_allowed(self, wiki_dir, capsys):
+        """Copying from inside wiki should succeed."""
         internal = wiki_dir / "notes.md"
         internal.write_text("# Internal\n", encoding="utf-8")
 

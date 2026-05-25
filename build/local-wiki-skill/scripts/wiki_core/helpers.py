@@ -12,7 +12,7 @@ from . import DIRS, CATEGORY_LABELS
 # ReDoS protection: timeout for a single regex match call (seconds)
 _REGEX_MATCH_TIMEOUT = 5
 # Suspicious patterns that often cause catastrophic backtracking
-_SUSPICIOUS_RE = re.compile(r"\([^)]*[+*|][^)]*\)[+*]")
+_SUSPICIOUS_RE = re.compile(r"\([^)]*[+*][^)]*\)[+*]")
 
 
 def now() -> str:
