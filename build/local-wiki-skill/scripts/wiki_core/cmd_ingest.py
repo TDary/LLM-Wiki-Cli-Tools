@@ -2,17 +2,60 @@
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import re
+import socket
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.request import Request, urlopen
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen, HTTPRedirectHandler, build_opener
 from urllib.error import URLError, HTTPError
 
 from . import DIRS, CATEGORY_LABELS
 from .helpers import expand, require_wiki, now, today, collect_documents, clear_doc_cache, read_schema_meta, append_to_log
 from .templates import template_wiki_page
+
+# Security limits
+_MAX_RESPONSE_BYTES = 50 * 1024 * 1024  # 50 MB
+_PRIVATE_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _validate_url(url: str) -> None:
+    """Validate URL for safety. Raises ValueError on rejection."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"不允许的 URL 协议: {parsed.scheme}（仅支持 http/https）")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("URL 缺少主机名")
+    try:
+        addr = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for family, _, _, _, sockaddr in addr:
+            ip = ipaddress.ip_address(sockaddr[0])
+            for net in _PRIVATE_NETWORKS:
+                if ip in net:
+                    raise ValueError(f"拒绝访问内网/保留地址: {ip} ({hostname})")
+    except socket.gaierror:
+        raise ValueError(f"无法解析主机名: {hostname}")
+
+
+class _SSRFSafeRedirectHandler(HTTPRedirectHandler):
+    """Redirect handler that validates each hop against SSRF rules."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 # ── HTML to text converter ──
@@ -76,11 +119,13 @@ def _html_to_text(html_content: str) -> str:
 
 def _fetch_url(url: str, timeout: int = 30) -> tuple[str, str, str]:
     """Fetch URL content. Returns (final_url, content_type, text)."""
+    _validate_url(url)
     req = Request(url, headers={
         "User-Agent": "Mozilla/5.0 (compatible; wiki-tools/1.2)",
         "Accept": "text/html, text/plain, text/markdown, */*",
     })
-    resp = urlopen(req, timeout=timeout)
+    opener = build_opener(_SSRFSafeRedirectHandler)
+    resp = opener.open(req, timeout=timeout)
     final_url = resp.geturl()
     content_type = resp.headers.get("Content-Type", "text/plain")
 
@@ -93,7 +138,9 @@ def _fetch_url(url: str, timeout: int = 30) -> tuple[str, str, str]:
                 encoding = part.split("=", 1)[1].strip().strip('"')
                 break
 
-    body = resp.read()
+    body = resp.read(_MAX_RESPONSE_BYTES + 1)
+    if len(body) > _MAX_RESPONSE_BYTES:
+        raise ValueError(f"响应体过大（超过 {_MAX_RESPONSE_BYTES // 1024 // 1024} MB 限制）")
 
     # Check if binary
     if not content_type.startswith("text/"):
@@ -110,7 +157,6 @@ def _fetch_url(url: str, timeout: int = 30) -> tuple[str, str, str]:
 
 def _slugify_url(url: str) -> str:
     """Convert URL to a filesystem-safe slug for naming raw/ files."""
-    from urllib.parse import urlparse
     parsed = urlparse(url)
     # Use path component
     slug = parsed.path.strip("/")
@@ -285,6 +331,12 @@ def _ingest_manifest(wiki_path: Path, args: argparse.Namespace) -> None:
                 if not src.exists():
                     errors.append({"index": i, "error": f"文件不存在: {src}"})
                     continue
+
+                # Security: warn when source is outside wiki directory
+                try:
+                    src.resolve().relative_to(wiki_path.resolve())
+                except ValueError:
+                    print(f"  ⚠️  源文件不在 wiki 目录内: {src}")
 
                 print(f"  [{i}/{len(sources)}] 导入: {src}")
 
@@ -483,6 +535,12 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         if not src.exists():
             print(f"❌ 文件不存在: {src}")
             sys.exit(1)
+
+        # Security: warn when source is outside wiki directory
+        try:
+            src.resolve().relative_to(path.resolve())
+        except ValueError:
+            print(f"⚠️  源文件不在 wiki 目录内: {src}")
 
         slug = src.stem.lower().replace(" ", "-")
         slug = re.sub(r"[^\w-]", "-", slug)

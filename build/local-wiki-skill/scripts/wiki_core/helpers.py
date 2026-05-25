@@ -3,10 +3,16 @@
 import json
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from datetime import datetime
 from pathlib import Path
 
 from . import DIRS, CATEGORY_LABELS
+
+# ReDoS protection: timeout for a single regex match call (seconds)
+_REGEX_MATCH_TIMEOUT = 5
+# Suspicious patterns that often cause catastrophic backtracking
+_SUSPICIOUS_RE = re.compile(r"\([^)]*[+*|][^)]*\)[+*]")
 
 
 def now() -> str:
@@ -119,18 +125,34 @@ def search_documents(docs: list[dict], keyword: str, regex: bool = False) -> lis
     """Search documents by keyword or regex pattern in title and body content."""
     if regex:
         try:
-            matcher = re.compile(keyword).search
+            compiled = re.compile(keyword)
         except re.error as e:
             print(f"❌ 无效正则表达式: {e}")
             sys.exit(1)
+        # ReDoS guard: reject patterns with nested quantifiers
+        if _SUSPICIOUS_RE.search(keyword):
+            print(f"❌ 正则表达式包含嵌套量词，可能存在 ReDoS 风险: {keyword}")
+            sys.exit(1)
+        matcher = compiled.search
     else:
         kw_lower = keyword.lower()
         matcher = lambda s: kw_lower in s.lower()
 
+    def _safe_match(s: str) -> bool:
+        """Run matcher with timeout protection for regex mode."""
+        if not regex:
+            return matcher(s)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(matcher, s)
+            try:
+                return bool(future.result(timeout=_REGEX_MATCH_TIMEOUT))
+            except FutureTimeout:
+                return False
+
     results = []
     for doc in docs:
         matches_in_file = []
-        if matcher(doc["title"]):
+        if _safe_match(doc["title"]):
             matches_in_file.append({"line": 0, "content": doc["title"]})
         text = doc.get("_text")
         if text is None:
@@ -141,7 +163,7 @@ def search_documents(docs: list[dict], keyword: str, regex: bool = False) -> lis
             except Exception:
                 pass
         for line_no, line in enumerate(text.splitlines(), 1):
-            if matcher(line):
+            if _safe_match(line):
                 matches_in_file.append({"line": line_no, "content": line.strip()})
         if matches_in_file:
             out = {k: v for k, v in doc.items() if k != "_text"}

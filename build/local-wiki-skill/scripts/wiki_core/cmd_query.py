@@ -164,6 +164,11 @@ def _try_index_search(path: Path, keyword: str, docs: list[dict], no_raw: bool =
     results = []
     for filepath, target_lines in by_file.items():
         fp = path / filepath
+        # Path traversal guard: resolved path must stay within wiki directory
+        try:
+            fp.resolve().relative_to(path.resolve())
+        except ValueError:
+            continue
         if not fp.exists():
             continue
         try:

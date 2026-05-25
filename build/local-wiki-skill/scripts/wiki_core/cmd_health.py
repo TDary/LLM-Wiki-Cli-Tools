@@ -3,6 +3,7 @@
 import argparse
 import json
 import re
+import shlex
 import subprocess
 import sys
 from datetime import datetime, timedelta
@@ -311,7 +312,7 @@ def cmd_health(args: argparse.Namespace) -> None:
         if cmd:
             try:
                 proc = subprocess.run(
-                    cmd, shell=True, capture_output=True, text=True,
+                    shlex.split(cmd), shell=False, capture_output=True, text=True,
                     timeout=5, cwd=str(path),
                 )
                 if proc.stdout.strip():
