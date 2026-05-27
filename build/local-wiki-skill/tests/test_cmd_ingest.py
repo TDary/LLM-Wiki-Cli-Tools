@@ -909,3 +909,205 @@ class TestProcessStaleRefs:
         content = (wiki_dir / "entities" / "e.md").read_text(encoding="utf-8")
         assert "raw/gone.md" not in content
         assert "raw/keep.md" in content
+
+    def test_multiple_stale_files_same_referrer(self, wiki_dir):
+        """Multiple stale sources pointing to the same referrer page."""
+        (wiki_dir / "raw" / "keep.md").write_text("# Keep\n", encoding="utf-8")
+        _write_page(wiki_dir, "entities", "e.md",
+                     "---\ntitle: E\nsources: [raw/gone1.md, raw/gone2.md, raw/keep.md]\n---\n# E\n")
+
+        clear_doc_cache()
+        actions = _process_stale_refs(
+            wiki_dir,
+            {"raw/gone1.md": ["entities/e.md"], "raw/gone2.md": ["entities/e.md"]},
+            apply=False,
+        )
+        assert len(actions) == 2
+        assert all(a["action"] == "clean_reference" for a in actions)
+        assert all(a["referrer"] == "entities/e.md" for a in actions)
+
+    def test_read_error_skips_page(self, wiki_dir, capsys):
+        """If referrer file can't be read, skip it gracefully."""
+        # Stale ref points to a file that doesn't exist
+        actions = _process_stale_refs(
+            wiki_dir,
+            {"raw/gone.md": ["entities/nonexistent.md"]},
+            apply=False,
+        )
+        assert len(actions) == 0
+
+
+class TestCmdRefreshEdgeCases:
+    """Boundary tests for cmd_refresh."""
+
+    def _make_args(self, wiki_dir, fmt="table", apply=False):
+        import argparse
+        return argparse.Namespace(
+            path=str(wiki_dir),
+            format=fmt,
+            pretty=False,
+            apply=apply,
+        )
+
+    def test_raw_dir_missing_exits(self, tmp_path):
+        """Should exit if raw/ directory does not exist."""
+        import argparse
+        # Create a minimal wiki structure (schema.md) but no raw/
+        (tmp_path / "schema.md").write_text("# Schema\n", encoding="utf-8")
+        args = argparse.Namespace(path=str(tmp_path), format="table", pretty=False, apply=False)
+        with pytest.raises(SystemExit):
+            cmd_refresh(args)
+
+    def test_unreferenced_raw_subdirectory_ignored(self, wiki_dir, capsys):
+        """Only *.md files in raw/ are scanned, subdirectories ignored."""
+        (wiki_dir / "raw" / "subdir").mkdir()
+        (wiki_dir / "raw" / "subdir" / "nested.md").write_text("# Nested\n", encoding="utf-8")
+        (wiki_dir / "raw" / "top.md").write_text("# Top\n", encoding="utf-8")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir)
+        cmd_refresh(args)
+        captured = capsys.readouterr()
+        # top.md should be flagged as new, subdir/nested.md should not appear
+        assert "raw/top.md" in captured.out
+        assert "nested" not in captured.out
+
+    def test_multiple_pages_ref_same_raw(self, wiki_dir, capsys):
+        """Multiple wiki pages referencing the same raw file — not flagged as new."""
+        (wiki_dir / "raw" / "shared.md").write_text("# Shared\n", encoding="utf-8")
+        _write_page(wiki_dir, "entities", "a.md",
+                     "---\ntitle: A\nsources: [raw/shared.md]\n---\n# A\n")
+        _write_page(wiki_dir, "concepts", "b.md",
+                     "---\ntitle: B\nsources: [raw/shared.md]\n---\n# B\n")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir)
+        cmd_refresh(args)
+        captured = capsys.readouterr()
+        assert "无变更" in captured.out
+
+    def test_stale_ref_with_multiple_referrers(self, wiki_dir):
+        """Stale raw file referenced by multiple pages — both listed in stale_detail."""
+        _write_page(wiki_dir, "entities", "a.md",
+                     "---\ntitle: A\nsources: [raw/gone.md]\n---\n# A\n")
+        _write_page(wiki_dir, "concepts", "b.md",
+                     "---\ntitle: B\nsources: [raw/gone.md]\n---\n# B\n")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir, fmt="json")
+        import io
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        cmd_refresh(args)
+        output = json.loads(sys.stdout.getvalue())
+        sys.stdout = old_stdout
+
+        assert output["summary"]["stale"] == 1
+        referrers = output["stale_actions"][0]["referrer"]
+        # Both pages should be in the stale actions
+        action_referrers = [a["referrer"] for a in output["stale_actions"]]
+        assert "entities/a.md" in action_referrers
+        assert "concepts/b.md" in action_referrers
+
+    def test_json_output_stale_multi_referrers_actions(self, wiki_dir):
+        """JSON stale_actions should have one entry per referrer, not per raw file."""
+        _write_page(wiki_dir, "entities", "a.md",
+                     "---\ntitle: A\nsources: [raw/gone.md]\n---\n# A\nshort\n")
+        _write_page(wiki_dir, "concepts", "b.md",
+                     "---\ntitle: B\nsources: [raw/gone.md]\n---\n# B\nshort\n")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir, fmt="json")
+        import io
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        cmd_refresh(args)
+        output = json.loads(sys.stdout.getvalue())
+        sys.stdout = old_stdout
+
+        assert len(output["stale_actions"]) == 2
+        referrers = {a["referrer"] for a in output["stale_actions"]}
+        assert referrers == {"entities/a.md", "concepts/b.md"}
+
+
+class TestUpdateFrontmatterEdgeCases:
+    """Boundary tests for _update_frontmatter_sources and _update_frontmatter_fields."""
+
+    def test_unclosed_frontmatter_returns_unchanged(self):
+        """Frontmatter with no closing --- should return text unchanged."""
+        text = "---\ntitle: T\nsources: [raw/a.md]\n# Body\n"
+        result = _update_frontmatter_sources(text, "raw/a.md")
+        assert result == text
+
+    def test_remove_nonexistent_source(self):
+        """Removing a source that isn't listed should leave sources unchanged."""
+        text = "---\ntitle: T\nsources: [raw/a.md]\n---\n# T\n"
+        result = _update_frontmatter_sources(text, "raw/b.md")
+        assert "raw/a.md" in result
+        assert "sources:" in result
+
+    def test_add_field_to_unclosed_frontmatter(self):
+        """_update_frontmatter_fields on unclosed frontmatter returns unchanged."""
+        text = "---\ntitle: T\n# Body\n"
+        result = _update_frontmatter_fields(text, {"source_status": "review"})
+        assert result == text
+
+    def test_update_multiple_fields(self):
+        """Should update multiple fields at once."""
+        text = "---\ntitle: T\nsources: []\n---\n# T\n"
+        result = _update_frontmatter_fields(text, {
+            "source_status": "review",
+            "archive_suggested": "true",
+        })
+        assert "source_status: review" in result
+        assert "archive_suggested: true" in result
+
+    def test_update_existing_field_value(self):
+        """Should replace existing field value, not duplicate."""
+        text = "---\ntitle: T\nsource_status: old\n---\n# T\n"
+        result = _update_frontmatter_fields(text, {"source_status": "review"})
+        assert "source_status: review" in result
+        assert "source_status: old" not in result
+
+
+class TestClassifyPageContentEdgeCases:
+    """Boundary tests for _classify_page_content."""
+
+    def test_quote_ratio_exactly_30_percent_is_summary(self):
+        """Quote ratio at exactly 0.3 threshold should classify as summary."""
+        # 3 quote lines out of 10 non-empty lines = 0.3, still summary (> 0.3)
+        # Need body > 300 chars to avoid short-content rule
+        lines = ["# T"]
+        for i in range(7):
+            lines.append(f"Normal line {i} with enough content to be counted. " * 3)
+        for i in range(3):
+            lines.append(f"> Quote line {i} with enough content. " * 3)
+        text = "---\ntitle: T\n---\n" + "\n".join(lines) + "\n"
+        # 3/10 = 0.3, condition is > 0.3 so this should be general
+        assert _classify_page_content(text) == "general"
+
+    def test_quote_ratio_above_30_percent_is_summary(self):
+        """Quote ratio just above 0.3 should classify as summary."""
+        lines = ["# T"]
+        for i in range(6):
+            lines.append(f"Normal line {i} with enough content to be counted. " * 3)
+        for i in range(4):
+            lines.append(f"> Quote line {i} with enough content. " * 3)
+        text = "---\ntitle: T\n---\n" + "\n".join(lines) + "\n"
+        # 4/10 = 0.4 > 0.3
+        assert _classify_page_content(text) == "summary"
+
+    def test_empty_body_is_summary(self):
+        """Page with only frontmatter and no body should be summary (len < 300)."""
+        text = "---\ntitle: T\nsources: [raw/a.md]\n---\n"
+        assert _classify_page_content(text) == "summary"
+
+    def test_no_nonempty_lines_avoids_division_by_zero(self):
+        """All-blank body should not crash and should classify as summary."""
+        text = "---\ntitle: T\n---\n\n\n\n"
+        assert _classify_page_content(text) == "summary"
+
+    def test_frontmatter_only_no_closing(self):
+        """Unclosed frontmatter — body is empty, should be summary."""
+        text = "---\ntitle: T\nsources: [raw/a.md]"
+        assert _classify_page_content(text) == "summary"
