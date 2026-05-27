@@ -743,10 +743,8 @@ def cmd_refresh(args: argparse.Namespace) -> None:
     raw_referrers: dict[str, list[str]] = {}
 
     for doc in wiki_docs:
-        fp = path / doc["file"]
-        try:
-            text = fp.read_text(encoding="utf-8")
-        except Exception:
+        text = doc.get("_text") or ""
+        if not text:
             continue
         sources = _parse_sources_from_frontmatter(text)
         for src in sources:
