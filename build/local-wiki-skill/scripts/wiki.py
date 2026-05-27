@@ -15,7 +15,7 @@ from wiki_core import VERSION, DIRS
 from wiki_core.cmd_init import cmd_init, cmd_sync, cmd_bootstrap, cmd_install
 from wiki_core.cmd_query import cmd_list, cmd_index, cmd_search, cmd_backlinks, cmd_tags, cmd_stats
 from wiki_core.cmd_health import cmd_orphans, cmd_health, cmd_trace, cmd_fix, cmd_rename, cmd_archive
-from wiki_core.cmd_ingest import cmd_ingest
+from wiki_core.cmd_ingest import cmd_ingest, cmd_refresh
 
 
 def main() -> None:
@@ -134,6 +134,13 @@ def main() -> None:
     p_ingest.add_argument("--format", default="table", choices=["table", "json"])
     p_ingest.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
 
+    # ── refresh ──
+    p_refresh = sub.add_parser("refresh", help="刷新 raw/ 目录，检测新增/删除的原始资料")
+    p_refresh.add_argument("path", nargs="?", default=".")
+    p_refresh.add_argument("--apply", action="store_true", help="执行清理（默认仅预览）")
+    p_refresh.add_argument("--format", default="table", choices=["table", "json"])
+    p_refresh.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
+
     # ── dispatch ──
     args = parser.parse_args()
     if args.command is None:
@@ -158,6 +165,7 @@ def main() -> None:
         "rename": cmd_rename,
         "archive": cmd_archive,
         "ingest": cmd_ingest,
+        "refresh": cmd_refresh,
     }
 
     handler = dispatch.get(args.command)

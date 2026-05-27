@@ -1,6 +1,6 @@
 """wiki-core — Local wiki management core package."""
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 DIRS = ["raw", "entities", "concepts", "relations", "queries", "drafts"]
 

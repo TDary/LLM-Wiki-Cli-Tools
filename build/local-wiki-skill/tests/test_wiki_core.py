@@ -45,6 +45,12 @@ from wiki_core.cmd_ingest import (
     _extract_keywords,
     _suggest_related,
     _HTMLTextExtractor,
+    _parse_sources_from_frontmatter,
+    _classify_page_content,
+    _update_frontmatter_sources,
+    _update_frontmatter_fields,
+    _process_stale_refs,
+    cmd_refresh,
 )
 from wiki_core.cmd_health import cmd_rename
 
@@ -1415,3 +1421,394 @@ class TestFileCopyWarning:
         cmd_ingest(args)
         captured = capsys.readouterr()
         assert "不在 wiki 目录内" not in captured.out
+
+
+# ═══════════════════════════════════════════
+# cmd_refresh tests
+# ═══════════════════════════════════════════
+
+
+class TestParseSourcesFromFrontmatter:
+    """Test _parse_sources_from_frontmatter helper."""
+
+    def test_single_source(self):
+        text = "---\ntitle: Test\nsources: [raw/foo.md]\n---\n"
+        assert _parse_sources_from_frontmatter(text) == ["raw/foo.md"]
+
+    def test_multiple_sources(self):
+        text = "---\ntitle: Test\nsources: [raw/a.md, raw/b.md]\n---\n"
+        assert _parse_sources_from_frontmatter(text) == ["raw/a.md", "raw/b.md"]
+
+    def test_no_sources_field(self):
+        text = "---\ntitle: Test\n---\n"
+        assert _parse_sources_from_frontmatter(text) == []
+
+    def test_empty_sources(self):
+        text = "---\ntitle: Test\nsources: []\n---\n"
+        assert _parse_sources_from_frontmatter(text) == []
+
+    def test_no_frontmatter(self):
+        text = "# Just a heading\n"
+        assert _parse_sources_from_frontmatter(text) == []
+
+    def test_whitespace_handling(self):
+        text = "---\nsources: [ raw/a.md , raw/b.md ]\n---\n"
+        result = _parse_sources_from_frontmatter(text)
+        assert "raw/a.md" in result
+        assert "raw/b.md" in result
+
+
+class TestCmdRefresh:
+    """Test cmd_refresh command."""
+
+    def _make_args(self, wiki_dir, fmt="table", apply=False):
+        import argparse
+        return argparse.Namespace(
+            path=str(wiki_dir),
+            format=fmt,
+            pretty=False,
+            apply=apply,
+        )
+
+    def test_no_raw_files(self, wiki_dir, capsys):
+        """Refresh with empty raw/ should show no changes."""
+        args = self._make_args(wiki_dir)
+        cmd_refresh(args)
+        captured = capsys.readouterr()
+        assert "无变更" in captured.out
+
+    def test_new_raw_file_detected(self, wiki_dir, capsys):
+        """Raw file not referenced by any wiki page should be flagged as new."""
+        # Create a raw file with no wiki page referencing it
+        raw_file = wiki_dir / "raw" / "new-article.md"
+        raw_file.write_text("# New Article\n\nSome content.\n", encoding="utf-8")
+
+        args = self._make_args(wiki_dir)
+        cmd_refresh(args)
+        captured = capsys.readouterr()
+        assert "新增原始资料" in captured.out
+        assert "raw/new-article.md" in captured.out
+
+    def test_processed_raw_file_not_flagged(self, wiki_dir, capsys):
+        """Raw file referenced by a wiki page should NOT be flagged."""
+        # Create a raw file
+        raw_file = wiki_dir / "raw" / "processed.md"
+        raw_file.write_text("# Processed\n\nContent.\n", encoding="utf-8")
+
+        # Create a wiki page that references it
+        _write_page(wiki_dir, "entities", "my-entity.md",
+                     "---\ntitle: My Entity\nsources: [raw/processed.md]\n---\n# My Entity\n")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir)
+        cmd_refresh(args)
+        captured = capsys.readouterr()
+        assert "无变更" in captured.out
+
+    def test_deleted_raw_file_detected(self, wiki_dir, capsys):
+        """Wiki page referencing a deleted raw file should be flagged."""
+        # Create a wiki page referencing a non-existent raw file
+        _write_page(wiki_dir, "concepts", "my-concept.md",
+                     "---\ntitle: My Concept\nsources: [raw/deleted.md]\n---\n# My Concept\n")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir)
+        cmd_refresh(args)
+        captured = capsys.readouterr()
+        assert "已删除的原始资料" in captured.out
+        assert "raw/deleted.md" in captured.out
+
+    def test_mixed_new_and_deleted(self, wiki_dir, capsys):
+        """Both new and deleted files should be reported."""
+        # New raw file (unreferenced)
+        new_raw = wiki_dir / "raw" / "new.md"
+        new_raw.write_text("# New\n", encoding="utf-8")
+
+        # Wiki page referencing deleted raw file
+        _write_page(wiki_dir, "entities", "e.md",
+                     "---\ntitle: E\nsources: [raw/gone.md]\n---\n# E\n")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir)
+        cmd_refresh(args)
+        captured = capsys.readouterr()
+        assert "新增原始资料" in captured.out
+        assert "raw/new.md" in captured.out
+        assert "已删除的原始资料" in captured.out
+        assert "raw/gone.md" in captured.out
+
+    def test_json_output_new_files(self, wiki_dir):
+        """JSON output should list new files with metadata."""
+        raw_file = wiki_dir / "raw" / "article.md"
+        raw_file.write_text("# Article Title\n\nBody.\n", encoding="utf-8")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir, fmt="json")
+        import io
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        cmd_refresh(args)
+        output = json.loads(sys.stdout.getvalue())
+        sys.stdout = old_stdout
+
+        assert output["action"] == "refresh"
+        assert output["summary"]["new"] == 1
+        assert output["new_files"][0]["file"] == "raw/article.md"
+        assert output["agent_required"] is True
+        assert "pending_files" in output
+
+    def test_json_output_no_changes(self, wiki_dir):
+        """JSON output with no changes should show zero counts."""
+        args = self._make_args(wiki_dir, fmt="json")
+        import io
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        cmd_refresh(args)
+        output = json.loads(sys.stdout.getvalue())
+        sys.stdout = old_stdout
+
+        assert output["action"] == "refresh"
+        assert output["summary"]["new"] == 0
+        assert output["summary"]["stale"] == 0
+        assert "agent_required" not in output
+
+    def test_json_output_stale_refs(self, wiki_dir):
+        """JSON output should list stale references with referrer pages."""
+        _write_page(wiki_dir, "concepts", "c.md",
+                     "---\ntitle: C\nsources: [raw/missing.md]\n---\n# C\n")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir, fmt="json")
+        import io
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        cmd_refresh(args)
+        output = json.loads(sys.stdout.getvalue())
+        sys.stdout = old_stdout
+
+        assert output["summary"]["stale"] == 1
+        assert output["stale_actions"][0]["raw_file"] == "raw/missing.md"
+        assert output["stale_actions"][0]["referrer"] == "concepts/c.md"
+
+    def test_log_updated(self, wiki_dir):
+        """Refresh should update log.md."""
+        raw_file = wiki_dir / "raw" / "test.md"
+        raw_file.write_text("# Test\n", encoding="utf-8")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir)
+        cmd_refresh(args)
+
+        log_content = (wiki_dir / "log.md").read_text(encoding="utf-8")
+        assert "refresh" in log_content
+
+    def test_requires_wiki_dir(self, tmp_path):
+        """Should exit if path is not a wiki directory."""
+        import argparse
+        args = argparse.Namespace(path=str(tmp_path), format="table", pretty=False, apply=False)
+        with pytest.raises(SystemExit):
+            cmd_refresh(args)
+
+    def test_apply_cleans_multi_source_ref(self, wiki_dir, capsys):
+        """--apply should remove stale ref from multi-source page."""
+        # Create the surviving raw file
+        (wiki_dir / "raw" / "other.md").write_text("# Other\n", encoding="utf-8")
+        _write_page(wiki_dir, "entities", "e.md",
+                     "---\ntitle: E\nsources: [raw/gone.md, raw/other.md]\n---\n# E\n")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir, apply=True)
+        cmd_refresh(args)
+        captured = capsys.readouterr()
+        assert "仅清理引用" in captured.out
+
+        # Verify file was updated
+        content = (wiki_dir / "entities" / "e.md").read_text(encoding="utf-8")
+        assert "raw/gone.md" not in content
+        assert "raw/other.md" in content
+
+    def test_apply_marks_single_source_summary(self, wiki_dir, capsys):
+        """--apply should mark single-source summary page with archive_suggested."""
+        _write_page(wiki_dir, "drafts", "d.md",
+                     "---\ntitle: D\nsources: [raw/gone.md]\n---\n# D\nshort\n")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir, apply=True)
+        cmd_refresh(args)
+        captured = capsys.readouterr()
+        assert "建议归档" in captured.out
+
+        content = (wiki_dir / "drafts" / "d.md").read_text(encoding="utf-8")
+        assert "archive_suggested: true" in content
+        assert "source_status: review" in content
+        assert "raw/gone.md" not in content
+
+    def test_apply_marks_single_source_general_knowledge(self, wiki_dir, capsys):
+        """--apply should mark single-source general knowledge page for review."""
+        long_content = "# Knowledge\n\n" + "This is general knowledge. " * 50
+        _write_page(wiki_dir, "concepts", "k.md",
+                     f"---\ntitle: K\nsources: [raw/gone.md]\n---\n\n{long_content}")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir, apply=True)
+        cmd_refresh(args)
+        captured = capsys.readouterr()
+        assert "标记待审" in captured.out
+
+        content = (wiki_dir / "concepts" / "k.md").read_text(encoding="utf-8")
+        assert "source_status: review" in content
+        assert "archive_suggested" not in content
+        assert "raw/gone.md" not in content
+
+    def test_dry_run_does_not_modify_files(self, wiki_dir, capsys):
+        """Without --apply, files should not be modified."""
+        _write_page(wiki_dir, "concepts", "c.md",
+                     "---\ntitle: C\nsources: [raw/gone.md]\n---\n# C\n")
+
+        original = (wiki_dir / "concepts" / "c.md").read_text(encoding="utf-8")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir, apply=False)
+        cmd_refresh(args)
+        captured = capsys.readouterr()
+        assert "预览" in captured.out
+
+        content = (wiki_dir / "concepts" / "c.md").read_text(encoding="utf-8")
+        assert content == original
+
+    def test_json_output_stale_actions_structure(self, wiki_dir):
+        """JSON stale_actions should include action type and classification."""
+        _write_page(wiki_dir, "concepts", "c.md",
+                     "---\ntitle: C\nsources: [raw/gone.md]\n---\n# C\nshort\n")
+
+        clear_doc_cache()
+        args = self._make_args(wiki_dir, fmt="json")
+        import io
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        cmd_refresh(args)
+        output = json.loads(sys.stdout.getvalue())
+        sys.stdout = old_stdout
+
+        action = output["stale_actions"][0]
+        assert action["action"] == "suggest_archive"
+        assert action["content_type"] == "summary"
+        assert action["is_only_source"] is True
+
+
+class TestClassifyPageContent:
+    """Test _classify_page_content helper."""
+
+    def test_short_content_is_summary(self):
+        text = "---\ntitle: T\n---\n# T\nShort.\n"
+        assert _classify_page_content(text) == "summary"
+
+    def test_summary_heading_detected(self):
+        text = "---\ntitle: T\n---\n# T\n\n## Summary\n\nThis is a summary.\n"
+        assert _classify_page_content(text) == "summary"
+
+    def test_chinese_summary_heading_detected(self):
+        text = "---\ntitle: T\n---\n# T\n\n## 摘要\n\n这是摘要内容。\n"
+        assert _classify_page_content(text) == "summary"
+
+    def test_high_quote_ratio_is_summary(self):
+        lines = ["# T", ""]
+        for i in range(20):
+            lines.append(f"> Quote line {i}")
+        lines.append("Non-quote")
+        text = "---\ntitle: T\n---\n" + "\n".join(lines) + "\n"
+        assert _classify_page_content(text) == "summary"
+
+    def test_long_general_content(self):
+        content = "# Concept\n\n" + "This is general knowledge about AI. " * 30
+        text = f"---\ntitle: T\n---\n\n{content}\n"
+        assert _classify_page_content(text) == "general"
+
+    def test_no_frontmatter(self):
+        text = "# Just content\n\n" + "Some body text. " * 30 + "\n"
+        assert _classify_page_content(text) == "general"
+
+
+class TestUpdateFrontmatterSources:
+    """Test _update_frontmatter_sources helper."""
+
+    def test_remove_source(self):
+        text = "---\ntitle: T\nsources: [raw/a.md, raw/b.md]\n---\n# T\nBody.\n"
+        result = _update_frontmatter_sources(text, "raw/a.md")
+        assert "raw/a.md" not in result
+        assert "raw/b.md" in result
+        assert "# T" in result
+        assert "Body." in result
+
+    def test_remove_only_source_leaves_empty(self):
+        text = "---\ntitle: T\nsources: [raw/a.md]\n---\n# T\nBody.\n"
+        result = _update_frontmatter_sources(text, "raw/a.md")
+        assert "sources: []" in result
+
+    def test_add_fields(self):
+        text = "---\ntitle: T\nsources: [raw/a.md]\n---\n# T\n"
+        result = _update_frontmatter_sources(text, "raw/a.md")
+        result = _update_frontmatter_fields(result, {"source_status": "review"})
+        assert "source_status: review" in result
+
+    def test_preserves_body_content(self):
+        text = "---\ntitle: T\nsources: [raw/a.md]\n---\n# Heading\n\nParagraph text.\n"
+        result = _update_frontmatter_sources(text, "raw/a.md")
+        assert "# Heading" in result
+        assert "Paragraph text." in result
+
+    def test_no_frontmatter_returns_unchanged(self):
+        text = "# No frontmatter\nJust content.\n"
+        result = _update_frontmatter_sources(text, "raw/a.md")
+        assert result == text
+
+
+class TestProcessStaleRefs:
+    """Test _process_stale_refs helper."""
+
+    def test_multi_source_clean_reference(self, wiki_dir):
+        """Multi-source page should get clean_reference action."""
+        _write_page(wiki_dir, "entities", "e.md",
+                     "---\ntitle: E\nsources: [raw/gone.md, raw/keep.md]\n---\n# E\n")
+
+        clear_doc_cache()
+        actions = _process_stale_refs(wiki_dir, {"raw/gone.md": ["entities/e.md"]}, apply=False)
+        assert len(actions) == 1
+        assert actions[0]["action"] == "clean_reference"
+        assert actions[0]["is_only_source"] is False
+
+    def test_single_source_summary_suggests_archive(self, wiki_dir):
+        """Single-source summary page should get suggest_archive action."""
+        _write_page(wiki_dir, "drafts", "d.md",
+                     "---\ntitle: D\nsources: [raw/gone.md]\n---\n# D\nShort.\n")
+
+        clear_doc_cache()
+        actions = _process_stale_refs(wiki_dir, {"raw/gone.md": ["drafts/d.md"]}, apply=False)
+        assert len(actions) == 1
+        assert actions[0]["action"] == "suggest_archive"
+        assert actions[0]["content_type"] == "summary"
+
+    def test_single_source_general_marks_review(self, wiki_dir):
+        """Single-source general knowledge page should get mark_review action."""
+        long_content = "# Knowledge\n\n" + "General content. " * 50
+        _write_page(wiki_dir, "concepts", "k.md",
+                     f"---\ntitle: K\nsources: [raw/gone.md]\n---\n\n{long_content}")
+
+        clear_doc_cache()
+        actions = _process_stale_refs(wiki_dir, {"raw/gone.md": ["concepts/k.md"]}, apply=False)
+        assert len(actions) == 1
+        assert actions[0]["action"] == "mark_review"
+        assert actions[0]["content_type"] == "general"
+
+    def test_apply_modifies_file(self, wiki_dir):
+        """With apply=True, should actually modify the file."""
+        _write_page(wiki_dir, "entities", "e.md",
+                     "---\ntitle: E\nsources: [raw/gone.md, raw/keep.md]\n---\n# E\nBody.\n")
+
+        clear_doc_cache()
+        actions = _process_stale_refs(wiki_dir, {"raw/gone.md": ["entities/e.md"]}, apply=True)
+        assert actions[0].get("applied") is True
+
+        content = (wiki_dir / "entities" / "e.md").read_text(encoding="utf-8")
+        assert "raw/gone.md" not in content
+        assert "raw/keep.md" in content

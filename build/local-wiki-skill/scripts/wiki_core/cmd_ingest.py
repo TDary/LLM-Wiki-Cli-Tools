@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen, HTTPRedirectHandler, build_opener
 from urllib.error import URLError, HTTPError
 
 from . import DIRS, CATEGORY_LABELS
-from .helpers import expand, require_wiki, now, today, collect_documents, clear_doc_cache, read_schema_meta, append_to_log
+from .helpers import expand, require_wiki, now, today, collect_documents, clear_doc_cache, read_schema_meta, append_to_log, extract_title, extract_frontmatter_from_text
 from .templates import template_wiki_page
 
 # Security limits
@@ -457,6 +457,415 @@ def _ingest_manifest(wiki_path: Path, args: argparse.Namespace) -> None:
             dest = r.get("destination", "")
             title = r.get("title", "?")
             print(f"   ☐ {dest} — {title}")
+
+
+def _parse_sources_from_frontmatter(text: str) -> list[str]:
+    """Extract raw file paths from `sources:` frontmatter field.
+
+    Handles formats: sources: [raw/foo.md], sources: [raw/a.md, raw/b.md]
+    """
+    fm = extract_frontmatter_from_text(text)
+    raw_val = fm.get("sources", "")
+    if not raw_val:
+        return []
+    # Already a list (parsed by extract_frontmatter_from_text for [...] format)
+    if isinstance(raw_val, list):
+        return [s.strip() for s in raw_val if s.strip()]
+    # Single string value
+    val = str(raw_val).strip()
+    if val.startswith("[") and val.endswith("]"):
+        val = val[1:-1]
+    return [s.strip() for s in val.split(",") if s.strip()]
+
+
+# Summary-like patterns that suggest content depends heavily on a single source
+_SUMMARY_PATTERNS = [
+    re.compile(r"^> .*总结", re.MULTILINE),
+    re.compile(r"^> .*摘要", re.MULTILINE),
+    re.compile(r"^## (?:Summary|摘要|总结|概要)", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"^> .*原文", re.MULTILINE),
+    re.compile(r"^## (?:原文|Original)", re.MULTILINE | re.IGNORECASE),
+]
+
+
+def _classify_page_content(text: str) -> str:
+    """Classify whether page content is a direct summary or general knowledge.
+
+    Returns 'summary' if the page appears to be a direct summary/extract of
+    its source material, 'general' if it appears to contain independent knowledge.
+    """
+    # Strip frontmatter for analysis
+    lines = text.splitlines()
+    body_lines = []
+    in_fm = False
+    for i, line in enumerate(lines):
+        if i == 0 and line.strip() == "---":
+            in_fm = True
+            continue
+        if in_fm:
+            if line.strip() == "---":
+                in_fm = False
+            continue
+        body_lines.append(line)
+
+    body = "\n".join(body_lines).strip()
+
+    # Very short pages are likely summaries
+    if len(body) < 300:
+        return "summary"
+
+    # Check for summary-like patterns
+    for pat in _SUMMARY_PATTERNS:
+        if pat.search(body):
+            return "summary"
+
+    # Check ratio of quoted/blockquote content (high = likely summary)
+    quote_lines = sum(1 for l in body_lines if l.strip().startswith(">"))
+    total_lines = sum(1 for l in body_lines if l.strip())
+    if total_lines > 0 and quote_lines / total_lines > 0.3:
+        return "summary"
+
+    return "general"
+
+
+def _update_frontmatter_sources(
+    text: str,
+    remove_source: str,
+) -> str:
+    """Remove a source from frontmatter.
+
+    Returns the modified text. If no frontmatter exists, returns text unchanged.
+    """
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return text
+
+    # Find frontmatter boundaries
+    end_idx = -1
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end_idx = i
+            break
+    if end_idx < 0:
+        return text
+
+    fm_lines = lines[1:end_idx]
+    body_lines = lines[end_idx + 1:]
+
+    # Process sources line
+    new_fm_lines = []
+    for line in fm_lines:
+        stripped = line.strip()
+        if stripped.startswith("sources:"):
+            sources = _parse_sources_from_text(stripped)
+            sources = [s for s in sources if s != remove_source]
+            if sources:
+                new_fm_lines.append(f"sources: [{', '.join(sources)}]")
+            else:
+                new_fm_lines.append("sources: []")
+        else:
+            new_fm_lines.append(line)
+
+    # Reconstruct: frontmatter + body
+    parts = ["---", "\n".join(new_fm_lines), "---"]
+    if body_lines:
+        parts.append("\n".join(body_lines))
+    return "\n".join(parts) + "\n"
+
+
+def _update_frontmatter_fields(text: str, fields: dict[str, str]) -> str:
+    """Add or update fields in existing frontmatter."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return text
+
+    end_idx = -1
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end_idx = i
+            break
+    if end_idx < 0:
+        return text
+
+    fm_lines = lines[1:end_idx]
+    body_lines = lines[end_idx + 1:]
+
+    # Update existing fields, track which keys were found
+    new_fm_lines = []
+    updated_keys: set[str] = set()
+    for line in fm_lines:
+        key = line.strip().split(":")[0].strip() if ":" in line.strip() else ""
+        if key in fields:
+            new_fm_lines.append(f"{key}: {fields[key]}")
+            updated_keys.add(key)
+        else:
+            new_fm_lines.append(line)
+
+    # Add fields that weren't already present
+    for key, val in fields.items():
+        if key not in updated_keys:
+            new_fm_lines.append(f"{key}: {val}")
+
+    parts = ["---", "\n".join(new_fm_lines), "---"]
+    if body_lines:
+        parts.append("\n".join(body_lines))
+    return "\n".join(parts) + "\n"
+
+
+def _parse_sources_from_text(frontmatter_line: str) -> list[str]:
+    """Parse sources from a single frontmatter line like 'sources: [a, b]'."""
+    _, _, val = frontmatter_line.partition(":")
+    val = val.strip()
+    if val.startswith("[") and val.endswith("]"):
+        val = val[1:-1]
+    return [s.strip() for s in val.split(",") if s.strip()]
+
+
+def _process_stale_refs(
+    wiki_path: Path,
+    stale_detail: dict[str, list[str]],
+    apply: bool,
+) -> list[dict]:
+    """Process stale references: classify and optionally update wiki pages.
+
+    Groups stale sources by referrer page so each page is processed once.
+    Classification is based on the state AFTER all stale sources are removed.
+
+    Returns list of action records for each processed ref.
+    """
+    # Invert: referrer_file -> [raw_files that are stale]
+    page_stale: dict[str, list[str]] = {}
+    for raw_file, referrers in stale_detail.items():
+        for ref in referrers:
+            page_stale.setdefault(ref, []).append(raw_file)
+
+    actions = []
+
+    for referrer_file, stale_files in page_stale.items():
+        fp = wiki_path / referrer_file
+        try:
+            text = fp.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        sources = _parse_sources_from_frontmatter(text)
+        remaining = [s for s in sources if s not in stale_files]
+        has_remaining = len(remaining) > 0
+
+        if has_remaining:
+            # Page still has valid sources — just clean the stale ones
+            for raw_file in stale_files:
+                actions.append({
+                    "raw_file": raw_file,
+                    "referrer": referrer_file,
+                    "is_only_source": False,
+                    "action": "clean_reference",
+                    "description": "清理失效引用（页面仍有其他来源）",
+                })
+            if apply:
+                new_text = text
+                for raw_file in stale_files:
+                    new_text = _update_frontmatter_sources(new_text, raw_file)
+                fp.write_text(new_text, encoding="utf-8")
+                for a in actions[-len(stale_files):]:
+                    a["applied"] = True
+        else:
+            # All sources are stale — classify content
+            content_type = _classify_page_content(text)
+            if content_type == "summary":
+                for raw_file in stale_files:
+                    actions.append({
+                        "raw_file": raw_file,
+                        "referrer": referrer_file,
+                        "is_only_source": True,
+                        "content_type": content_type,
+                        "action": "suggest_archive",
+                        "description": "唯一来源且内容为直接摘要，建议归档",
+                    })
+                if apply:
+                    new_text = text
+                    for raw_file in stale_files:
+                        new_text = _update_frontmatter_sources(new_text, raw_file)
+                    new_text = _update_frontmatter_fields(
+                        new_text,
+                        {"source_status": "review", "archive_suggested": "true"},
+                    )
+                    fp.write_text(new_text, encoding="utf-8")
+                    for a in actions[-len(stale_files):]:
+                        a["applied"] = True
+            else:
+                for raw_file in stale_files:
+                    actions.append({
+                        "raw_file": raw_file,
+                        "referrer": referrer_file,
+                        "is_only_source": True,
+                        "content_type": content_type,
+                        "action": "mark_review",
+                        "description": "唯一来源已失，内容为通用知识，标记待审",
+                    })
+                if apply:
+                    new_text = text
+                    for raw_file in stale_files:
+                        new_text = _update_frontmatter_sources(new_text, raw_file)
+                    new_text = _update_frontmatter_fields(
+                        new_text, {"source_status": "review"},
+                    )
+                    fp.write_text(new_text, encoding="utf-8")
+                    for a in actions[-len(stale_files):]:
+                        a["applied"] = True
+
+    return actions
+
+
+def cmd_refresh(args: argparse.Namespace) -> None:
+    """Scan raw/ and cross-reference with wiki pages to find new/deleted files."""
+    path = expand(args.path or ".")
+    require_wiki(path)
+
+    raw_dir = path / "raw"
+    if not raw_dir.is_dir():
+        print(f"❌ raw/ 目录不存在: {raw_dir}")
+        sys.exit(1)
+
+    apply = getattr(args, "apply", False)
+
+    # Collect raw files
+    raw_files = sorted(f"raw/{f.name}" for f in raw_dir.glob("*.md"))
+    raw_set = set(raw_files)
+
+    # Collect wiki pages (exclude raw/ and queries/)
+    docs = collect_documents(path)
+    wiki_docs = [d for d in docs if d["category"] not in ("raw", "queries")]
+
+    # Build set of referenced raw files from frontmatter
+    referenced_raw: set[str] = set()
+    # Map: raw_file -> [page that references it]
+    raw_referrers: dict[str, list[str]] = {}
+
+    for doc in wiki_docs:
+        fp = path / doc["file"]
+        try:
+            text = fp.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        sources = _parse_sources_from_frontmatter(text)
+        for src in sources:
+            # Normalize: strip leading ./ and use forward slashes
+            src_norm = src.lstrip("./").replace("\\", "/")
+            referenced_raw.add(src_norm)
+            raw_referrers.setdefault(src_norm, []).append(doc["file"])
+
+    # New files: in raw/ but not referenced by any wiki page
+    new_files = sorted(raw_set - referenced_raw)
+
+    # Stale refs: referenced but file no longer exists on disk
+    stale_refs = sorted(referenced_raw - raw_set)
+    stale_detail = {ref: raw_referrers.get(ref, []) for ref in stale_refs}
+
+    has_changes = bool(new_files or stale_refs)
+
+    # Process stale refs if --apply or always classify for output
+    stale_actions = _process_stale_refs(path, stale_detail, apply=apply)
+
+    # Log the refresh action
+    details = [f"New raw files: {len(new_files)}", f"Stale references: {len(stale_refs)}"]
+    if new_files:
+        details.append(f"  Pending extraction: {', '.join(new_files[:5])}")
+        if len(new_files) > 5:
+            details.append(f"  ... and {len(new_files) - 5} more")
+    if apply and stale_actions:
+        applied = [a for a in stale_actions if a.get("applied")]
+        details.append(f"  Applied: {len(applied)} stale ref cleanups")
+    append_to_log(path, "refresh", details)
+
+    clear_doc_cache()
+
+    # ── Output ──
+    if args.format == "json":
+        meta = read_schema_meta(path)
+        output = {
+            "wiki": meta,
+            "action": "refresh",
+            "apply": apply,
+            "new_files": [
+                {"file": f, "title": extract_title(path / f)}
+                for f in new_files
+            ],
+            "stale_actions": stale_actions,
+            "summary": {
+                "total_raw_files": len(raw_files),
+                "processed": len(raw_set & referenced_raw),
+                "new": len(new_files),
+                "stale": len(stale_refs),
+                "stale_cleaned": len([a for a in stale_actions if a["action"] == "clean_reference"]),
+                "stale_review": len([a for a in stale_actions if a["action"] == "mark_review"]),
+                "stale_archive": len([a for a in stale_actions if a["action"] == "suggest_archive"]),
+            },
+            "log_updated": True,
+        }
+        if new_files:
+            output["agent_required"] = True
+            output["agent_instruction"] = (
+                "发现新增原始资料。Agent 必须对每个新文件执行知识提取："
+                "读取 raw/ → 提取实体/概念/关系 → 创建 wiki 页面（含 frontmatter + wikilinks）→ 更新 log.md。"
+                "详见 SKILL.md「Full Ingest Workflow」。"
+            )
+            output["pending_files"] = new_files
+        print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
+        return
+
+    # Table output
+    if not has_changes:
+        print(f"✅ 刷新检查完成 — 无变更（{len(raw_files)} 个原始资料均已处理）")
+        return
+
+    mode_label = "已执行" if apply else "预览"
+    print(f"🔄 刷新检查完成（{mode_label}）\n")
+
+    if new_files:
+        print(f"📥 新增原始资料（需要知识提取）: {len(new_files)} 个")
+        for f in new_files:
+            title = extract_title(path / f)
+            print(f"   ☐ {f} — {title}")
+        print(f"   └── Agent 必须执行: 读取 → 提取实体/概念/关系 → 创建 wiki 页面 → 更新 log.md")
+
+    if stale_actions:
+        if new_files:
+            print()
+
+        # Group by action type
+        clean_refs = [a for a in stale_actions if a["action"] == "clean_reference"]
+        mark_review = [a for a in stale_actions if a["action"] == "mark_review"]
+        suggest_archive = [a for a in stale_actions if a["action"] == "suggest_archive"]
+
+        total_stale = len(stale_actions)
+        print(f"⚠️  已删除的原始资料（引用失效）: {total_stale} 个\n")
+
+        if clean_refs:
+            print(f"   📎 仅清理引用（{len(clean_refs)} 个）:")
+            for a in clean_refs:
+                print(f"      • {a['referrer']} ← {a['raw_file']}")
+                if apply:
+                    print(f"        ✅ 已清理")
+
+        if mark_review:
+            print(f"\n   🔍 标记待审（{len(mark_review)} 个，唯一来源已失但内容为通用知识）:")
+            for a in mark_review:
+                print(f"      • {a['referrer']} ← {a['raw_file']}")
+                if apply:
+                    print(f"        ✅ 已标记 source_status: review")
+
+        if suggest_archive:
+            print(f"\n   📦 建议归档（{len(suggest_archive)} 个，唯一来源且内容为直接摘要）:")
+            for a in suggest_archive:
+                print(f"      • {a['referrer']} ← {a['raw_file']}")
+                if apply:
+                    print(f"        ✅ 已标记 archive_suggested: true")
+
+        if not apply:
+            print(f"\n   💡 使用 --apply 执行清理")
+
+    print(f"\n📝 日志已更新: log.md")
 
 
 # ── command ──

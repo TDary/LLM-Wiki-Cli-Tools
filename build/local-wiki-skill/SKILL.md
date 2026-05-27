@@ -1,10 +1,10 @@
 ---
 name: wiki
-version: 1.3.0
+version: 1.4.0
 description: 创建、查询和管理本地知识库，纯文件模式，零依赖
 ---
 
-# Local Wiki Skill v1.3.0
+# Local Wiki Skill v1.4.0
 
 Zero-dependency local wiki management for Claude Code. Pure Python, pure files — no Git, no network, just Python 3.9+.
 
@@ -48,6 +48,8 @@ local-wiki-skill/
 | `health` 检查发现断链 | 立即运行 `fix --apply` 修复 |
 | `health` 检查发现孤立文档 | 为每个孤立文档建立至少 1 条 `[[wikilink]]` 关联 |
 | `search` 返回结果且用户问题需要综合分析 | 读取匹配文档全文，综合回答后判断是否回写 |
+| `refresh` 发现新增原始资料 | 对每个新文件执行完整的知识提取流程（同 ingest 工作流） |
+| `refresh` 发现已删除的原始资料 | 清理失效的 `sources:` 引用，更新相关 wiki 页面的 frontmatter |
 | `rename` 执行成功 | 验证所有 wikilinks 已更新，检查 index.md 是否同步，更新 log.md |
 | `archive` 执行成功 | 验证 index.md 中已移除该页面，检查是否有上下文引用需要更新（如 query 页面），更新 log.md |
 | `fix --apply` 执行成功 | 向用户报告修复详情（哪些链接被改了），验证修复结果，更新 log.md |
@@ -76,6 +78,7 @@ local-wiki-skill/
 | `python scripts/wiki.py tags [path]` | List all tags with counts and documents |
 | `python scripts/wiki.py stats [path]` | Knowledge base statistics overview |
 | `python scripts/wiki.py ingest [path]` | Ingest external source (URL, file, or template) |
+| `python scripts/wiki.py refresh [path]` | Refresh raw/ — detect new/deleted source files (`--apply` to clean refs) |
 
 ## Quick Check
 
@@ -722,6 +725,172 @@ sources: [raw/example-article.md]
 - `sources` 必须指向 `raw/` 中的源文件（溯源）
 - `tags` 必须来自 SCHEMA.md 中定义的标签体系。**Agent 不可自行创建新标签**，只能使用已有标签。如需新增标签，必须向用户提出建议并等待确认后才能写入 SCHEMA.md 和页面 frontmatter。
 - 每次更新页面时 `updated` 日期必须更新
+
+## /wiki refresh
+
+```
+/wiki refresh [path] [--apply] [--format table|json] [--pretty]
+```
+
+刷新 `raw/` 目录，检测新增和删除的原始资料。通过交叉比对 `raw/` 文件与 wiki 页面的 `sources:` frontmatter，找出处理缺口。
+
+**检测逻辑：**
+- **新增文件**：`raw/` 中存在但没有任何 wiki 页面在 `sources:` 中引用 → 需要知识提取
+- **已删除文件**：wiki 页面 `sources:` 引用了不存在的 `raw/` 文件 → 引用失效，需清理
+
+**Options:**
+- `--apply` — 执行清理（默认仅预览）。处理已删除文件的引用：
+  - 多来源页面：移除失效引用，保留其他来源
+  - 唯一来源且内容为直接摘要：移除引用 + 标记 `archive_suggested: true`
+  - 唯一来源且内容为通用知识：移除引用 + 标记 `source_status: review`
+- `--format json` — 输出 JSON（含 `new_files`、`stale_actions`、`summary`、`agent_instruction`）
+- `--pretty` — JSON 缩进
+
+**示例：**
+
+```bash
+# 检查 raw/ 目录状态
+python scripts/wiki.py refresh .
+
+# JSON 输出，供 agent 解析
+python scripts/wiki.py refresh . --format json
+```
+
+**Table 输出示例（有变更时）：**
+
+```
+🔄 刷新检查完成
+
+📥 新增原始资料（需要知识提取）: 2 个
+   ☐ raw/new-article.md — New Article Title
+   ☐ raw/another-doc.md — Another Document
+   └── Agent 必须执行: 读取 → 提取实体/概念/关系 → 创建 wiki 页面 → 更新 log.md
+
+⚠️ 已删除的原始资料（引用失效）: 1 个
+   • raw/deleted-file.md
+     被引用于: entities/some-page.md
+
+📝 日志已更新: log.md
+```
+
+**Table 输出示例（无变更时）：**
+
+```
+✅ 刷新检查完成 — 无变更（15 个原始资料均已处理）
+```
+
+### Full Refresh Workflow (CLI + Agent)
+
+**执行前 Checklist（Agent 必须逐项确认）：**
+
+```
+☐ 已运行 refresh 获取变更报告
+☐ 新增文件 → 对每个新文件执行完整的知识提取流程（同 Full Ingest Workflow）
+☐ 已删除文件 → 清理相关 wiki 页面的 sources: 引用
+☐ 已删除文件 → 检查页面内容是否仍有效，必要时补充新来源
+☐ 已更新 log.md
+```
+
+**跳过任何一项 = 任务未完成。**
+
+**refresh 后 Agent 工作流：**
+
+```
+Agent:
+  1. 调用 CLI
+     → python wiki.py refresh . --format json
+  2. 解析 JSON 输出
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 新增文件处理（new_files）                                     │
+  │   对每个 pending_file，执行 Full Ingest Workflow 的知识提取层： │
+  │   读取 → 提取实体/概念/关系 → 创建 wiki 页面 → 交叉引用       │
+  └─────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 已删除文件处理（stale_refs）                                  │
+  │   对每个失效引用：                                            │
+  │   1. 读取引用方页面                                           │
+  │   2. 从 frontmatter sources: 中移除已删除的 raw 文件          │
+  │   3. 检查页面内容是否依赖该源文件                              │
+  │      → 内容仍有效：仅清理 frontmatter                         │
+  │      → 内容需要更新：标记或补充新来源                          │
+  │   4. 更新 log.md                                             │
+  └─────────────────────────────────────────────────────────────┘
+```
+
+**新增文件处理 Checklist（Agent 必须逐项确认，对每个文件）：**
+
+```
+☐ 已从 CLI 输出获取「pending_files」清单
+☐ 对清单中的每个文件，执行以下循环：
+
+  文件 N: raw/<filename>.md
+  ☐ 已读取该文件完整内容
+  ☐ 已识别实体 → 创建 entities/<name>.md（含 frontmatter + wikilinks）
+  ☐ 已识别概念 → 创建 concepts/<name>.md（含 frontmatter + wikilinks）
+  ☐ 已识别关系 → 创建 relations/<a>-vs-<b>.md（含 frontmatter + wikilinks）
+  ☐ 已检查已有页面，添加反向 [[wikilinks]]
+  ☐ 已更新 log.md
+
+☐ 全部文件处理完毕后，已更新 index.md 或重新生成 queries/index.json
+☐ 已向用户汇报：创建/更新了哪些页面
+```
+
+**跳过任何一个文件 = 任务未完成。**
+
+**已删除文件处理 Checklist（Agent 必须逐项确认，对每个引用）：**
+
+```
+☐ 已从 CLI 输出获取「stale_refs」清单
+☐ 对清单中的每个引用，执行以下循环：
+
+  失效引用 N: raw/<deleted>.md ← <referrer>.md
+  ☐ 已读取引用方页面完整内容
+  ☐ 已从 frontmatter sources: 中移除已删除的 raw 文件路径
+  ☐ 已评估页面内容是否仍有效
+    → 内容仍有效：仅清理 frontmatter，不改正文
+    → 内容需要更新：标记过期、补充新来源或移除依赖该源的内容
+  ☐ 已更新 log.md
+
+☐ 全部引用处理完毕后，已向用户汇报清理结果
+```
+
+**跳过任何一个引用 = 任务未完成。**
+
+**强制循环结构：**
+
+```
+for file in CLI 输出的 pending_files:
+    1. 读取 raw/<file> 完整内容
+    2. 提取实体、概念、关系
+    3. 为每个提取项创建 wiki 页面（遵循 New page rule）
+    4. 建立交叉引用（≥2 wikilinks/页）
+    5. 检查已有页面是否需要反向链接
+
+for ref in CLI 输出的 stale_refs:
+    1. 读取引用方页面
+    2. 清理 sources: 中的失效路径
+    3. 评估页面内容有效性
+    4. 必要时标记或更新
+```
+
+**Agent 不可因文件数量多而跳过或批量略过。** 每个新增文件和每条失效引用都是独立的处理任务。
+
+### Agent 调用示例
+
+```
+用户: 看看 raw/ 有没有新文件需要处理
+
+Agent:
+  1. python wiki.py refresh . --format json
+  2. 解析输出，发现 2 个新增文件
+  3. 逐一执行知识提取：
+     - 读取 raw/new-article.md → 创建 entities/xxx.md, concepts/yyy.md
+     - 读取 raw/another-doc.md → 创建 concepts/zzz.md
+  4. 更新 log.md
+  5. 汇报：新增 2 个源文件，创建了 3 个 wiki 页面
+```
 
 ## Conventions
 
