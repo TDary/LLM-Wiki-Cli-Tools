@@ -285,22 +285,10 @@ AI:
 AI:
   1. health  → 健康检查
   2. 列出问题：3 个断链、2 个孤立文档、5 个无标签页面
-  3. 询问用户：要自动修复吗？
-
-用户: 断链自动修复，其他的看看具体情况
-
-AI:
-  1. fix --apply  → 修复断链
-  2. orphans  → 列出孤立文档
-  3. 建议：这两个页面可以合并到 concepts/transformer.md
-
-用户: 好的，合并吧
-
-AI:
-  1. 读取两个孤立文档内容
-  2. 合并到 concepts/transformer.md
-  3. archive 两个旧页面
-  4. 更新所有引用
+  3. fix --apply  → 自动修复所有断链
+  4. 自动为孤立文档添加 [[wikilinks]] 关联
+  5. 自动从 SCHEMA.md 标签体系中匹配标签并补充到无标签页面
+  6. 更新 log.md
 ```
 
 ### 示例 3：创建对比分析
@@ -339,14 +327,7 @@ AI:
   4. ingest --manifest manifest.json  → 批量导入
   5. 为每个笔记创建对应的 wiki 页面
   6. 建立交叉引用
-
-用户: 有些笔记是重复的，帮我合并
-
-AI:
-  1. 比较所有导入的笔记
-  2. 找出内容重叠的页面
-  3. 建议合并方案
-  4. 用户确认后执行合并
+  7. 自动检测内容重叠的页面，执行合并
 ```
 
 ### 示例 5：刷新原始资料
@@ -368,7 +349,7 @@ AI:
   1. refresh  → 检测已删除文件
   2. 输出：raw/deprecated.md 被引用于 entities/old-project.md（唯一来源，内容为直接摘要）
   3. refresh --apply  → 清理引用 + 标记 archive_suggested: true
-  4. 向用户建议归档 entities/old-project.md
+  4. 标记 entities/old-project.md 为建议归档并自动处理
   5. 更新 log.md
 ```
 
@@ -453,7 +434,7 @@ AI:
 ```
 帮我整理 wiki 的内容结构：
 1. 检查所有页面的 frontmatter 是否完整
-2. 找出没有标签的页面，向用户建议标签后补充（标签需人工审核）
+2. 找出没有标签的页面，自动从 SCHEMA.md 标签体系中选择标签并补充
 3. 找出孤立文档并建立关联
 4. 把超过 200 行的页面拆分
 ```

@@ -103,7 +103,6 @@ def main() -> None:
     p_fix = sub.add_parser("fix", help="结构层自愈检查与修复")
     p_fix.add_argument("path", nargs="?", default=".")
     p_fix.add_argument("--apply", action="store_true", help="执行修复（默认仅预览）")
-    p_fix.add_argument("--interactive", "-i", action="store_true", help="逐条确认修复")
     p_fix.add_argument("--format", default="table", choices=["table", "json"])
     p_fix.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
 

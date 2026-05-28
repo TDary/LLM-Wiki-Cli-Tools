@@ -719,11 +719,7 @@ def cmd_fix(args: argparse.Namespace) -> None:
         print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
         return
 
-    interactive = getattr(args, "interactive", False)
-    if args.apply:
-        mode = "交互执行" if interactive else "执行"
-    else:
-        mode = "预览"
+    mode = "执行" if args.apply else "预览"
     print(f"\n🔧 自愈检查 — {mode}模式")
     print(f"   发现 {len(fixes)} 个可修复项\n")
 
@@ -734,33 +730,30 @@ def cmd_fix(args: argparse.Namespace) -> None:
     broken = [f for f in fixes if f["type"] == "broken_link"]
     norm = [f for f in fixes if f["type"] == "normalize"]
 
-    skip_types: set[str] = set()
     applied_count = 0
-    skipped_count = 0
 
-    def _confirm_fix(fix: dict, skip_label: str) -> str:
-        """Interactive confirmation for a single fix. Returns 'apply', 'skipped', or 'skip_remaining'."""
-        nonlocal skipped_count
-        if interactive and fix["type"] not in skip_types:
-            status = "✅ 可修复" if fix["suggestion"] else "⚠️  需手动"
-            print(f"   {status}  {fix['file']}: {fix['action']}")
-            try:
-                ans = input(f"   确认? [y/n/s=跳过剩余{skip_label}] ").strip().lower()
-            except EOFError:
-                ans = "y"
-            if ans == "s":
-                skip_types.add(fix["type"])
-                skipped_count += 1
-                print(f"   ⏭️  跳过剩余{skip_label}")
-                return "skip_remaining"
-            elif ans == "n":
-                skipped_count += 1
-                print(f"   ⏭️  已跳过")
-                return "skipped"
-        if not fix["suggestion"]:
-            print(f"   ⏭️  {fix['file']}: {fix['action']} (需手动处理)")
-            return "skipped"
-        return "apply"
+    def _auto_apply(fix_list: list[dict]) -> None:
+        """Auto-apply all fixes with suggestions, grouped by file."""
+        nonlocal applied_count
+        fixes_by_file: dict[str, list[dict]] = {}
+        for f in fix_list:
+            if f["suggestion"]:
+                fixes_by_file.setdefault(f["file"], []).append(f)
+            else:
+                print(f"   ⏭️  {f['file']}: {f['action']} (需手动处理)")
+
+        for filepath, file_fixes in fixes_by_file.items():
+            fp = path / filepath
+            text = fp.read_text(encoding="utf-8")
+            for f in file_fixes:
+                if f["suggestion"] and f["suggestion"] in doc_info:
+                    info = doc_info[f["suggestion"]]
+                    text = text.replace(f"[[{f['original']}]]", f"[[{info['title']}]]")
+                elif f["suggestion"]:
+                    text = text.replace(f"[[{f['original']}]]", f"[[{f['suggestion']}]]")
+                print(f"   ✅ {f['file']}: {f['action']}")
+                applied_count += 1
+            fp.write_text(text, encoding="utf-8")
 
     def _print_dry_run(fix_list: list[dict]) -> None:
         for f in fix_list:
@@ -770,28 +763,7 @@ def cmd_fix(args: argparse.Namespace) -> None:
     if broken:
         print(f"   ── 断链修复 ({len(broken)} 处) ──")
         if args.apply:
-            # Collect fixes to apply, grouped by file
-            fixes_by_file: dict[str, list[dict]] = {}
-            for f in broken:
-                result = _confirm_fix(f, "断链修复")
-                if result == "skip_remaining":
-                    break
-                elif result == "apply":
-                    fixes_by_file.setdefault(f["file"], []).append(f)
-
-            # Batch apply: read each file once, apply all fixes, write once
-            for filepath, file_fixes in fixes_by_file.items():
-                fp = path / filepath
-                text = fp.read_text(encoding="utf-8")
-                for f in file_fixes:
-                    if f["suggestion"] and f["suggestion"] in doc_info:
-                        info = doc_info[f["suggestion"]]
-                        text = text.replace(f"[[{f['original']}]]", f"[[{info['title']}]]")
-                    elif f["suggestion"]:
-                        text = text.replace(f"[[{f['original']}]]", f"[[{f['suggestion']}]]")
-                    print(f"   ✅ {f['file']}: {f['action']}")
-                    applied_count += 1
-                fp.write_text(text, encoding="utf-8")
+            _auto_apply(broken)
         else:
             _print_dry_run(broken)
         print()
@@ -799,26 +771,7 @@ def cmd_fix(args: argparse.Namespace) -> None:
     if norm:
         print(f"   ── 命名规范化 ({len(norm)} 处) ──")
         if args.apply:
-            fixes_by_file = {}
-            for f in norm:
-                result = _confirm_fix(f, "规范化")
-                if result == "skip_remaining":
-                    break
-                elif result == "apply":
-                    fixes_by_file.setdefault(f["file"], []).append(f)
-
-            for filepath, file_fixes in fixes_by_file.items():
-                fp = path / filepath
-                text = fp.read_text(encoding="utf-8")
-                for f in file_fixes:
-                    if f["suggestion"] and f["suggestion"] in doc_info:
-                        info = doc_info[f["suggestion"]]
-                        text = text.replace(f"[[{f['original']}]]", f"[[{info['title']}]]")
-                    elif f["suggestion"]:
-                        text = text.replace(f"[[{f['original']}]]", f"[[{f['suggestion']}]]")
-                    print(f"   ✅ {f['file']}: {f['action']}")
-                    applied_count += 1
-                fp.write_text(text, encoding="utf-8")
+            _auto_apply(norm)
         else:
             _print_dry_run(norm)
         print()
@@ -828,12 +781,9 @@ def cmd_fix(args: argparse.Namespace) -> None:
         manual_count = len(fixes) - auto_count
         print(f"   💡 {auto_count} 项可自动修复，{manual_count} 项需手动处理。")
         print(f"      使用 --apply 执行自动修复。")
-        if not getattr(args, "interactive", False):
-            print(f"      使用 --interactive 逐条确认。")
     else:
         clear_doc_cache()
-        if getattr(args, "interactive", False):
-            print(f"   已应用 {applied_count} 项，跳过 {skipped_count} 项。")
+        print(f"   已应用 {applied_count} 项。")
 
 
 def cmd_rename(args: argparse.Namespace) -> None:

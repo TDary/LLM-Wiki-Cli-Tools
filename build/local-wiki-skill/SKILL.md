@@ -52,7 +52,7 @@ local-wiki-skill/
 | `refresh` 发现已删除的原始资料 | 清理失效的 `sources:` 引用，更新相关 wiki 页面的 frontmatter |
 | `rename` 执行成功 | 验证所有 wikilinks 已更新，检查 index.md 是否同步，更新 log.md |
 | `archive` 执行成功 | 验证 index.md 中已移除该页面，检查是否有上下文引用需要更新（如 query 页面），更新 log.md |
-| `fix --apply` 执行成功 | 向用户报告修复详情（哪些链接被改了），验证修复结果，更新 log.md |
+| `fix --apply` 执行成功 | 自动验证修复结果（哪些链接被改了），更新 log.md |
 | `search` 查询后回写新页面 | 必须遵循 New page rule（frontmatter + ≥2 wikilinks + log + index） |
 
 **违反以上任何一条 = 任务未完成。**
@@ -245,7 +245,7 @@ Output includes a health score (0-100) and actionable suggestions.
 ☐ 已逐项处理每个问题类别
 ☐ 断链 → 已运行 fix --apply
 ☐ 孤立文档 → 已添加 [[wikilink]] 关联
-☐ 无标签页面 → 已向用户建议标签，等待确认后补充
+☐ 无标签页面 → 已自动从 SCHEMA.md 标签体系中匹配最佳标签并补充
 ☐ 过期内容 → 已标记或更新
 ☐ 已更新 log.md
 ```
@@ -255,7 +255,7 @@ Output includes a health score (0-100) and actionable suggestions.
 ## /wiki fix
 
 ```
-/wiki fix [path] [--apply] [--interactive|-i] [--format table|json] [--pretty]
+/wiki fix [path] [--apply] [--format table|json] [--pretty]
 ```
 
 Structural self-healing: detect and auto-fix broken wikilinks and naming inconsistencies.
@@ -266,7 +266,6 @@ Structural self-healing: detect and auto-fix broken wikilinks and naming inconsi
 
 **Options:**
 - `--apply` — actually apply fixes (default is dry-run preview)
-- `--interactive`, `-i` — confirm each fix individually (y/n/s to skip remaining by type)
 - `--format json` — output as JSON (with `--pretty` for indentation)
 
 Default mode is dry-run: shows what would be fixed without making changes.
@@ -274,8 +273,8 @@ Default mode is dry-run: shows what would be fixed without making changes.
 **fix --apply 后验证 Checklist：**
 
 ```
-☐ 已向用户报告修复详情（哪些链接被改了，从什么改为什么）
-☐ 已确认无误修复（未引入新的断链）
+☐ 已验证修复详情（哪些链接被改了，从什么改为什么）
+☐ 已确认无新增断链
 ☐ 已更新 log.md
 ```
 
@@ -723,7 +722,7 @@ sources: [raw/example-article.md]
 ```
 
 - `sources` 必须指向 `raw/` 中的源文件（溯源）
-- `tags` 必须来自 SCHEMA.md 中定义的标签体系。**Agent 不可自行创建新标签**，只能使用已有标签。如需新增标签，必须向用户提出建议并等待确认后才能写入 SCHEMA.md 和页面 frontmatter。
+- `tags` 优先使用 SCHEMA.md 中已有的标签。如需新增标签，Agent 自行写入 SCHEMA.md 标签体系并同步使用。
 - 每次更新页面时 `updated` 日期必须更新
 
 ## /wiki refresh
@@ -904,7 +903,7 @@ When reading/writing wiki pages:
 6. **Read first**: before writing, check `SCHEMA.md`, `README.md`, and recent `log.md`
 7. **No skip rule**: Agent 必须完成 workflow 中的所有步骤。CLI 执行成功 ≠ 任务完成。知识提取、交叉引用、日志更新是强制步骤。
 8. **New page rule**: 创建任何新 wiki 页面时，以下 4 项缺一不可：① 完整 frontmatter（title/created/updated/type/tags/sources）② ≥2 条 `[[wikilinks]]` 出站链接 ③ 更新 `log.md` ④ 更新 `index.md`（如有）或重新生成 `queries/index.json`
-9. **Tag review**: 标签体系需人工审核。Agent 只能使用 SCHEMA.md 中已有的标签，不可自行创建新标签。如需新增，向用户提出建议并等待确认。
+9. **Tag review**: Agent 优先使用 SCHEMA.md 中已有的标签。如需新增标签，直接在 SCHEMA.md 标签体系中添加并同步使用，无需人工审核。
 
 ## Wiki Structure
 
