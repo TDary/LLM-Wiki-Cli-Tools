@@ -583,7 +583,7 @@ class TestCmdRefresh:
         args = self._make_args(wiki_dir)
         cmd_refresh(args)
         captured = capsys.readouterr()
-        assert "新增规范化资料" in captured.out
+        assert "新增标准化资料" in captured.out
         assert "normalized/new-article.md" in captured.out
 
     def test_processed_raw_file_not_flagged(self, wiki_dir, capsys):
@@ -612,7 +612,7 @@ class TestCmdRefresh:
         args = self._make_args(wiki_dir)
         cmd_refresh(args)
         captured = capsys.readouterr()
-        assert "已删除的规范化资料" in captured.out
+        assert "已删除的原始资料" in captured.out
         assert "normalized/deleted.md" in captured.out
 
     def test_mixed_new_and_deleted(self, wiki_dir, capsys):
@@ -629,9 +629,9 @@ class TestCmdRefresh:
         args = self._make_args(wiki_dir)
         cmd_refresh(args)
         captured = capsys.readouterr()
-        assert "新增规范化资料" in captured.out
+        assert "新增标准化资料" in captured.out
         assert "normalized/new.md" in captured.out
-        assert "已删除的规范化资料" in captured.out
+        assert "已删除的原始资料" in captured.out
         assert "normalized/gone.md" in captured.out
 
     def test_json_output_new_files(self, wiki_dir):
