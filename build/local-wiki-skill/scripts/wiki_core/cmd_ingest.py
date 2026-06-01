@@ -159,7 +159,7 @@ def _fetch_url(url: str, timeout: int = 30) -> tuple[str, str, str]:
 
 
 def _slugify_url(url: str) -> str:
-    """Convert URL to a filesystem-safe slug for naming raw/ files."""
+    """Convert URL to a filesystem-safe slug for naming normalized/ files."""
     parsed = urlparse(url)
     # Use path component
     slug = parsed.path.strip("/")
@@ -303,8 +303,8 @@ def _ingest_manifest(wiki_path: Path, args: argparse.Namespace) -> None:
                 final_url, content_type, text = _fetch_url(url)
 
                 slug = _slugify_url(url)
-                filename = _generate_filename(slug, wiki_path, "raw")
-                dest = wiki_path / "raw" / filename
+                filename = _generate_filename(slug, wiki_path, "normalized")
+                dest = wiki_path / "normalized" / filename
 
                 doc_title = _extract_title_from_text(text) or title or url
                 header = f"# {doc_title}\n\n> Source: {url}\n> Fetched: {now()}\n> Content-Type: {content_type}\n\n---\n\n"
@@ -317,7 +317,7 @@ def _ingest_manifest(wiki_path: Path, args: argparse.Namespace) -> None:
                     "index": i,
                     "source_type": "url",
                     "source": url,
-                    "destination": f"raw/{filename}",
+                    "destination": f"normalized/{filename}",
                     "size_bytes": dest.stat().st_size,
                     "title": doc_title,
                     "keywords": keywords,
@@ -350,8 +350,8 @@ def _ingest_manifest(wiki_path: Path, args: argparse.Namespace) -> None:
                 if not slug:
                     slug = "imported"
 
-                filename = _generate_filename(slug, wiki_path, "raw")
-                dest = wiki_path / "raw" / filename
+                filename = _generate_filename(slug, wiki_path, "normalized")
+                dest = wiki_path / "normalized" / filename
 
                 import shutil
                 shutil.copy2(src, dest)
@@ -369,7 +369,7 @@ def _ingest_manifest(wiki_path: Path, args: argparse.Namespace) -> None:
                     "index": i,
                     "source_type": "file",
                     "source": str(src),
-                    "destination": f"raw/{filename}",
+                    "destination": f"normalized/{filename}",
                     "size_bytes": dest.stat().st_size,
                     "title": doc_title,
                     "keywords": keywords,
@@ -432,7 +432,7 @@ def _ingest_manifest(wiki_path: Path, args: argparse.Namespace) -> None:
             "results": results,
             "errors_detail": errors,
             "agent_required": True,
-            "agent_instruction": "批量摄入仅完成结构层。Agent 必须对每个成功摄入的源文件逐一执行知识提取（读取 raw/ → 提取实体/概念/关系 → 创建 wiki 页面 → 交叉引用 → 更新 log.md）。详见 SKILL.md「批量摄入工作流」。",
+            "agent_instruction": "批量摄入仅完成结构层。Agent 必须对每个成功摄入的源文件逐一执行知识提取（读取 normalized/ → 提取实体/概念/关系 → 创建 wiki 页面 → 交叉引用 → 更新 log.md）。详见 SKILL.md「批量摄入工作流」。",
             "pending_files": [r.get("destination", "") for r in results],
         }
         print(json.dumps(output, ensure_ascii=False, indent=2 if args.pretty else None))
@@ -448,7 +448,7 @@ def _ingest_manifest(wiki_path: Path, args: argparse.Namespace) -> None:
     print(f"\n📝 日志已更新: log.md")
 
     # Remind agent: batch structural ingest is done, semantic extraction is next
-    print(f"\n⚠️  批量摄入仅完成结构层（保存到 raw/）。Agent 必须继续执行：")
+    print(f"\n⚠️  批量摄入仅完成结构层（保存到 normalized/）。Agent 必须继续执行：")
     print(f"   对每个成功摄入的源文件，逐一执行完整的知识提取流程。")
     print(f"   详见 SKILL.md「批量摄入工作流」。")
     if results:
@@ -460,9 +460,9 @@ def _ingest_manifest(wiki_path: Path, args: argparse.Namespace) -> None:
 
 
 def _parse_sources_from_frontmatter(text: str) -> list[str]:
-    """Extract raw file paths from `sources:` frontmatter field.
+    """Extract normalized file paths from `sources:` frontmatter field.
 
-    Handles formats: sources: [raw/foo.md], sources: [raw/a.md, raw/b.md]
+    Handles formats: sources: [normalized/foo.md], sources: [normalized/a.md, normalized/b.md]
     """
     fm = extract_frontmatter_from_text(text)
     raw_val = fm.get("sources", "")
@@ -718,29 +718,29 @@ def _process_stale_refs(
 
 
 def cmd_refresh(args: argparse.Namespace) -> None:
-    """Scan raw/ and cross-reference with wiki pages to find new/deleted files."""
+    """Scan normalized/ and cross-reference with wiki pages to find new/deleted files."""
     path = expand(args.path or ".")
     require_wiki(path)
 
-    raw_dir = path / "raw"
-    if not raw_dir.is_dir():
-        print(f"❌ raw/ 目录不存在: {raw_dir}")
+    norm_dir = path / "normalized"
+    if not norm_dir.is_dir():
+        print(f"❌ normalized/ 目录不存在: {norm_dir}")
         sys.exit(1)
 
     apply = getattr(args, "apply", False)
 
-    # Collect raw files
-    raw_files = sorted(f"raw/{f.name}" for f in raw_dir.glob("*.md"))
-    raw_set = set(raw_files)
+    # Collect normalized files
+    normalized_files = sorted(f"normalized/{f.name}" for f in norm_dir.glob("*.md"))
+    normalized_set = set(normalized_files)
 
-    # Collect wiki pages (exclude raw/ and queries/)
+    # Collect wiki pages (exclude raw/, normalized/, and queries/)
     docs = collect_documents(path)
-    wiki_docs = [d for d in docs if d["category"] not in ("raw", "queries")]
+    wiki_docs = [d for d in docs if d["category"] not in ("raw", "normalized", "queries")]
 
-    # Build set of referenced raw files from frontmatter
-    referenced_raw: set[str] = set()
-    # Map: raw_file -> [page that references it]
-    raw_referrers: dict[str, list[str]] = {}
+    # Build set of referenced normalized files from frontmatter
+    referenced_norm: set[str] = set()
+    # Map: normalized_file -> [page that references it]
+    norm_referrers: dict[str, list[str]] = {}
 
     for doc in wiki_docs:
         text = doc.get("_text") or ""
@@ -750,15 +750,15 @@ def cmd_refresh(args: argparse.Namespace) -> None:
         for src in sources:
             # Normalize: strip leading ./ and use forward slashes
             src_norm = src.lstrip("./").replace("\\", "/")
-            referenced_raw.add(src_norm)
-            raw_referrers.setdefault(src_norm, []).append(doc["file"])
+            referenced_norm.add(src_norm)
+            norm_referrers.setdefault(src_norm, []).append(doc["file"])
 
-    # New files: in raw/ but not referenced by any wiki page
-    new_files = sorted(raw_set - referenced_raw)
+    # New files: in normalized/ but not referenced by any wiki page
+    new_files = sorted(normalized_set - referenced_norm)
 
     # Stale refs: referenced but file no longer exists on disk
-    stale_refs = sorted(referenced_raw - raw_set)
-    stale_detail = {ref: raw_referrers.get(ref, []) for ref in stale_refs}
+    stale_refs = sorted(referenced_norm - normalized_set)
+    stale_detail = {ref: norm_referrers.get(ref, []) for ref in stale_refs}
 
     has_changes = bool(new_files or stale_refs)
 
@@ -766,7 +766,7 @@ def cmd_refresh(args: argparse.Namespace) -> None:
     stale_actions = _process_stale_refs(path, stale_detail, apply=apply)
 
     # Log the refresh action
-    details = [f"New raw files: {len(new_files)}", f"Stale references: {len(stale_refs)}"]
+    details = [f"New normalized files: {len(new_files)}", f"Stale references: {len(stale_refs)}"]
     if new_files:
         details.append(f"  Pending extraction: {', '.join(new_files[:5])}")
         if len(new_files) > 5:
@@ -791,8 +791,8 @@ def cmd_refresh(args: argparse.Namespace) -> None:
             ],
             "stale_actions": stale_actions,
             "summary": {
-                "total_raw_files": len(raw_files),
-                "processed": len(raw_set & referenced_raw),
+                "total_normalized_files": len(normalized_files),
+                "processed": len(normalized_set & referenced_norm),
                 "new": len(new_files),
                 "stale": len(stale_refs),
                 "stale_cleaned": len([a for a in stale_actions if a["action"] == "clean_reference"]),
@@ -804,8 +804,8 @@ def cmd_refresh(args: argparse.Namespace) -> None:
         if new_files:
             output["agent_required"] = True
             output["agent_instruction"] = (
-                "发现新增原始资料。Agent 必须对每个新文件执行知识提取："
-                "读取 raw/ → 提取实体/概念/关系 → 创建 wiki 页面（含 frontmatter + wikilinks）→ 更新 log.md。"
+                "发现新增规范化资料。Agent 必须对每个新文件执行知识提取："
+                "读取 normalized/ → 提取实体/概念/关系 → 创建 wiki 页面（含 frontmatter + wikilinks）→ 更新 log.md。"
                 "详见 SKILL.md「Full Ingest Workflow」。"
             )
             output["pending_files"] = new_files
@@ -814,14 +814,14 @@ def cmd_refresh(args: argparse.Namespace) -> None:
 
     # Table output
     if not has_changes:
-        print(f"✅ 刷新检查完成 — 无变更（{len(raw_files)} 个原始资料均已处理）")
+        print(f"✅ 刷新检查完成 — 无变更（{len(normalized_files)} 个规范化资料均已处理）")
         return
 
     mode_label = "已执行" if apply else "预览"
     print(f"🔄 刷新检查完成（{mode_label}）\n")
 
     if new_files:
-        print(f"📥 新增原始资料（需要知识提取）: {len(new_files)} 个")
+        print(f"📥 新增规范化资料（需要知识提取）: {len(new_files)} 个")
         for f in new_files:
             title = extract_title(path / f)
             print(f"   ☐ {f} — {title}")
@@ -837,7 +837,7 @@ def cmd_refresh(args: argparse.Namespace) -> None:
         suggest_archive = [a for a in stale_actions if a["action"] == "suggest_archive"]
 
         total_stale = len(stale_actions)
-        print(f"⚠️  已删除的原始资料（引用失效）: {total_stale} 个\n")
+        print(f"⚠️  已删除的规范化资料（引用失效）: {total_stale} 个\n")
 
         if clean_refs:
             print(f"   📎 仅清理引用（{len(clean_refs)} 个）:")
@@ -907,8 +907,8 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             sys.exit(1)
 
         slug = _slugify_url(url)
-        filename = _generate_filename(slug, path, "raw")
-        dest = path / "raw" / filename
+        filename = _generate_filename(slug, path, "normalized")
+        dest = path / "normalized" / filename
 
         # Build content with source header
         title = _extract_title_from_text(text)
@@ -922,7 +922,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         related = _suggest_related(path, keywords)
 
         append_to_log(path, f"ingest | {title}", [
-            f"Saved to: raw/{filename}",
+            f"Saved to: normalized/{filename}",
             f"Size: {dest.stat().st_size} bytes",
             f"Source: {url}",
         ])
@@ -931,7 +931,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             "action": "ingest",
             "source_type": "url",
             "source": url,
-            "destination": f"raw/{filename}",
+            "destination": f"normalized/{filename}",
             "size_bytes": dest.stat().st_size,
             "content_type": content_type,
             "title": title,
@@ -960,8 +960,8 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         if not slug:
             slug = "imported"
 
-        filename = _generate_filename(slug, path, "raw")
-        dest = path / "raw" / filename
+        filename = _generate_filename(slug, path, "normalized")
+        dest = path / "normalized" / filename
 
         import shutil
         shutil.copy2(src, dest)
@@ -977,7 +977,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         related = _suggest_related(path, keywords)
 
         append_to_log(path, f"ingest | {title}", [
-            f"Saved to: raw/{filename}",
+            f"Saved to: normalized/{filename}",
             f"Size: {dest.stat().st_size} bytes",
             f"Source: local file {src}",
         ])
@@ -986,7 +986,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             "action": "ingest",
             "source_type": "file",
             "source": str(src),
-            "destination": f"raw/{filename}",
+            "destination": f"normalized/{filename}",
             "size_bytes": dest.stat().st_size,
             "title": title,
             "keywords": keywords,
@@ -1034,7 +1034,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
 
     # Table output
     if args.url:
-        print(f"   保存到: raw/{result['destination'].split('/')[-1]}  ({result['size_bytes']} bytes)")
+        print(f"   保存到: normalized/{result['destination'].split('/')[-1]}  ({result['size_bytes']} bytes)")
         print(f"   类型: {result['content_type']}")
         if result.get("related_pages"):
             print(f"\n   💡 相关页面:")
@@ -1044,7 +1044,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
 
     elif args.file:
         print(f"📥 已导入: {args.file}")
-        print(f"   保存到: raw/{result['destination'].split('/')[-1]}  ({result['size_bytes']} bytes)")
+        print(f"   保存到: normalized/{result['destination'].split('/')[-1]}  ({result['size_bytes']} bytes)")
         if result.get("related_pages"):
             print(f"\n   💡 相关页面:")
             for rp in result["related_pages"][:5]:

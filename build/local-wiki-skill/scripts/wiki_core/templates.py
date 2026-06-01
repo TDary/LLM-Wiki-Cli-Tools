@@ -23,6 +23,7 @@ def template_schema(name: str, domain: str) -> str:
 | 目录 | 用途 |
 |------|------|
 | `raw/` | 原始资料、外部引用、数据文件 |
+| `normalized/` | 规范化后的资料（从 raw/ 解析生成） |
 | `entities/` | 实体页面（人、项目、工具等） |
 | `concepts/` | 概念、术语、方法论 |
 | `relations/` | 关系描述、交叉引用 |
@@ -62,6 +63,7 @@ def template_readme(name: str, domain: str) -> str:
 
 - [SCHEMA](./SCHEMA.md) — 知识库配置与目录说明
 - [原始资料](./raw/) — 外部引用与数据文件
+- [规范化资料](./normalized/) — 从 raw/ 解析生成的结构化内容
 - [实体](./entities/) — 人、项目、工具等
 - [概念](./concepts/) — 术语与方法论
 - [关系](./relations/) — 交叉引用

@@ -1,6 +1,6 @@
 ---
 name: wiki
-version: 1.4.0
+version: 1.4.5
 description: 创建、查询和管理本地知识库，纯文件模式，零依赖
 ---
 
@@ -43,13 +43,13 @@ local-wiki-skill/
 
 | 触发条件 | 强制动作 |
 |---------|---------|
-| `ingest --url` 或 `ingest --file` 执行成功 | 立即读取 raw/ 中的源文件，执行知识提取（见"Full Ingest Workflow"） |
+| `ingest --url` 或 `ingest --file` 执行成功 | 立即读取 normalized/ 中的源文件，执行知识提取（见"Full Ingest Workflow"） |
 | `ingest --manifest` 批量执行成功 | CLI 输出含「待处理文件清单」。Agent 必须按「批量摄入工作流」逐一执行知识提取，不可跳过任何文件 |
 | `health` 检查发现断链 | 立即运行 `fix --apply` 修复 |
 | `health` 检查发现孤立文档 | 为每个孤立文档建立至少 1 条 `[[wikilink]]` 关联 |
 | `search` 返回结果且用户问题需要综合分析 | 读取匹配文档全文，综合回答后判断是否回写 |
-| `refresh` 发现新增原始资料 | 对每个新文件执行完整的知识提取流程（同 ingest 工作流） |
-| `refresh` 发现已删除的原始资料 | 清理失效的 `sources:` 引用，更新相关 wiki 页面的 frontmatter |
+| `refresh` 发现新增规范化资料 | 对每个新文件执行完整的知识提取流程（同 ingest 工作流） |
+| `refresh` 发现已删除的规范化资料 | 清理失效的 `sources:` 引用，更新相关 wiki 页面的 frontmatter |
 | `rename` 执行成功 | 验证所有 wikilinks 已更新，检查 index.md 是否同步，更新 log.md |
 | `archive` 执行成功 | 验证 index.md 中已移除该页面，检查是否有上下文引用需要更新（如 query 页面），更新 log.md |
 | `fix --apply` 执行成功 | 自动验证修复结果（哪些链接被改了），更新 log.md |
@@ -78,7 +78,7 @@ local-wiki-skill/
 | `python scripts/wiki.py tags [path]` | List all tags with counts and documents |
 | `python scripts/wiki.py stats [path]` | Knowledge base statistics overview |
 | `python scripts/wiki.py ingest [path]` | Ingest external source (URL, file, or template) |
-| `python scripts/wiki.py refresh [path]` | Refresh raw/ — detect new/deleted source files (`--apply` to clean refs) |
+| `python scripts/wiki.py refresh [path]` | Refresh normalized/ — detect new/deleted source files (`--apply` to clean refs) |
 
 ## Quick Check
 
@@ -97,7 +97,7 @@ Create a new local wiki. Defaults: `path = ~/wiki`, `domain = "Wiki 知识库"`.
 Steps the script performs:
 1. Default path to `~/wiki`, domain to `"Wiki 知识库"`
 2. If `SCHEMA.md` already exists and no `--force`, report and exit
-3. Create 6 subdirectories: `raw/ entities/ concepts/ relations/ queries/ drafts/`
+3. Create 7 subdirectories: `raw/ normalized/ entities/ concepts/ relations/ queries/ drafts/`
 4. Write `SCHEMA.md`, `README.md`, `log.md`
 5. No `.gitignore`, `.gitattributes`, or `.gitkeep` — purely local
 
@@ -129,7 +129,7 @@ List all knowledge documents in the wiki. Default: table format grouped by categ
 - `--format json` — output as JSON (with `--pretty` for indentation)
 - `--category concepts` — filter to a single directory
 - `--tags AI,tech` — filter by tags (comma-separated, matches any)
-- `--include-raw` — include `raw/` directory (excluded by default, as raw files are immutable)
+- `--include-raw` — include `raw/` and `normalized/` directories (excluded by default, as source files are immutable)
 
 Output includes: title, file path, category, size, last modified time, tags, wiki-link count.
 
@@ -143,7 +143,7 @@ Full-text search across all wiki documents. Case-insensitive substring matching 
 
 **Options:**
 - `--format json` — output as JSON (with `--pretty` for indentation)
-- `--no-raw` — exclude `raw/` directory from search results
+- `--no-raw` — exclude `raw/` and `normalized/` directories from search results
 - `--regex` — treat keyword as a regular expression pattern
 - `--use-index` — use inverted index from `queries/index.json` for faster search (requires `index` to be run first). Falls back to full scan if index is stale or missing. **Note:** index uses word-level matching (`\w{2,}` tokens), so substring searches like Chinese characters (e.g., `中文` in `中文测试`) may not match — use without `--use-index` for substring search.
 
@@ -208,7 +208,7 @@ created: 2026-05-22      # 必填，YYYY-MM-DD
 updated: 2026-05-22      # 必填，YYYY-MM-DD
 type: entity             # 必填，entity|concept|comparison|query|summary
 tags: [tech, AI]         # 必填，必须在 SCHEMA.md 标签体系中（人工审核）
-sources: [raw/source.md] # 必填，指向 raw/ 源文件
+sources: [normalized/source.md] # 必填，指向 normalized/ 源文件
 ---
 ```
 
@@ -526,14 +526,14 @@ Agent:
 Ingest external sources into the wiki. Three modes:
 
 **URL mode** (`--url`):
-Fetch a URL, extract text content, save to `raw/` with source metadata header.
+Fetch a URL, extract text content, save to `normalized/` with source metadata header.
 
 ```bash
 python scripts/wiki.py ingest . --url https://example.com/article
 ```
 
 **File mode** (`--file`):
-Copy a local file into `raw/` with normalized filename.
+Copy a local file into `normalized/` with normalized filename.
 
 ```bash
 python scripts/wiki.py ingest . --file /path/to/document.md
@@ -577,8 +577,8 @@ Manifest format:
 **执行前 Checklist（Agent 必须逐项确认）：**
 
 ```
-☐ CLI 命令已执行，源文件已保存到 raw/
-☐ 已读取 raw/ 中源文件的完整内容
+☐ CLI 命令已执行，源文件已保存到 normalized/
+☐ 已读取 normalized/ 中源文件的完整内容
 ☐ 已识别实体（人/组织/产品/模型）
 ☐ 已识别概念（术语/方法论/技术原理）
 ☐ 已识别关系（对比/依赖/实现）
@@ -599,14 +599,14 @@ The `ingest` CLI command handles **structural operations** (save file, update lo
 ┌─────────────────────────────────────────────────────────────┐
 │ Step 1: CLI — 结构层（wiki.py ingest）                       │
 │   ✅ 抓取 URL 内容                                           │
-│   ✅ 保存到 raw/example-article.md（带源信息头）               │
+│   ✅ 保存到 normalized/example-article.md（带源信息头）        │
 │   ✅ 提取关键词，建议相关页面                                   │
 │   ✅ 更新 log.md                                             │
 └─────────────────────────────────────────────────────────────┘
          ↓ CLI 输出 JSON（含 title, keywords, related_pages）
 ┌─────────────────────────────────────────────────────────────┐
 │ Step 2: Agent — 知识提取层（大模型能力）                       │
-│   1. 读取 raw/example-article.md 全文                        │
+│   1. 读取 normalized/example-article.md 全文                  │
 │   2. 分析内容，提取：                                         │
 │      - 实体（人、组织、产品、模型）                             │
 │      - 概念（术语、方法论、技术原理）                           │
@@ -620,7 +620,7 @@ The `ingest` CLI command handles **structural operations** (save file, update lo
 │      - relations/transformer-vs-rnn.md                       │
 │   5. 每个页面包含：                                          │
 │      - YAML frontmatter（title, created, updated, type,      │
-│        tags, sources 指向 raw/ 源文件）                       │
+│        tags, sources 指向 normalized/ 源文件）                  │
 │      - 结构化内容（概述、要点、引用）                           │
 │      - [[wikilinks]] 交叉引用（≥2 条出站链接）                │
 │   6. 更新 log.md 记录所有创建/更新的页面                       │
@@ -629,7 +629,7 @@ The `ingest` CLI command handles **structural operations** (save file, update lo
 
 **Agent 后处理步骤：**
 
-1. **读取源文件** — 读 `raw/` 中刚保存的完整内容
+1. **读取源文件** — 读 `normalized/` 中刚保存的完整内容
 2. **实体提取** — 识别文中提到的人、组织、产品、模型等，每个创建 `entities/<name>.md`
 3. **概念提取** — 识别技术术语、方法论、原理，每个创建 `concepts/<name>.md`
 4. **关系提取** — 识别对比、依赖、实现等关系，创建 `relations/<a>-vs-<b>.md`
@@ -641,7 +641,7 @@ The `ingest` CLI command handles **structural operations** (save file, update lo
 
 ### 批量摄入工作流（--manifest）
 
-批量摄入 CLI 只完成**结构层**（下载/复制 → raw/ + log.md）。Agent 必须对每个成功摄入的源文件逐一执行**知识提取层**。不可跳过。
+批量摄入 CLI 只完成**结构层**（下载/复制 → normalized/ + log.md）。Agent 必须对每个成功摄入的源文件逐一执行**知识提取层**。不可跳过。
 
 **CLI 输出中的「待处理文件清单」是 Agent 的任务列表，逐条处理直到全部完成。**
 
@@ -651,7 +651,7 @@ The `ingest` CLI command handles **structural operations** (save file, update lo
 ☐ 已从 CLI 输出获取「待处理文件清单」
 ☐ 对清单中的每个文件，执行以下循环：
 
-  文件 N: raw/<filename>.md
+  文件 N: normalized/<filename>.md
   ☐ 已读取该文件完整内容
   ☐ 已识别实体 → 创建 entities/<name>.md（含 frontmatter + wikilinks）
   ☐ 已识别概念 → 创建 concepts/<name>.md（含 frontmatter + wikilinks）
@@ -669,7 +669,7 @@ The `ingest` CLI command handles **structural operations** (save file, update lo
 
 ```
 for file in CLI输出的待处理文件清单:
-    1. 读取 raw/<file> 完整内容
+    1. 读取 normalized/<file> 完整内容
     2. 提取实体、概念、关系
     3. 为每个提取项创建 wiki 页面（遵循 New page rule）
     4. 建立交叉引用（≥2 wikilinks/页）
@@ -687,7 +687,7 @@ for file in CLI输出的待处理文件清单:
 Agent:
   1. 调用 CLI 保存源文件
      → python wiki.py ingest . --url https://arxiv.org/abs/2301.00001
-  2. 读取 raw/arxiv-2301-00001.md
+  2. 读取 normalized/arxiv-2301-00001.md
   3. 分析内容，识别出 3 个实体、2 个概念、1 个关系
   4. 创建 6 个 wiki 页面（带 frontmatter 和交叉引用）
   5. 检查已有页面，添加反向 [[wikilinks]]
@@ -717,11 +717,11 @@ created: 2026-05-22
 updated: 2026-05-22
 type: entity | concept | comparison | query | summary
 tags: [tech, AI, ...]
-sources: [raw/example-article.md]
+sources: [normalized/example-article.md]
 ---
 ```
 
-- `sources` 必须指向 `raw/` 中的源文件（溯源）
+- `sources` 必须指向 `normalized/` 中的源文件（溯源）
 - `tags` 优先使用 SCHEMA.md 中已有的标签。如需新增标签，Agent 自行写入 SCHEMA.md 标签体系并同步使用。
 - 每次更新页面时 `updated` 日期必须更新
 
@@ -731,11 +731,11 @@ sources: [raw/example-article.md]
 /wiki refresh [path] [--apply] [--format table|json] [--pretty]
 ```
 
-刷新 `raw/` 目录，检测新增和删除的原始资料。通过交叉比对 `raw/` 文件与 wiki 页面的 `sources:` frontmatter，找出处理缺口。
+刷新 `normalized/` 目录，检测新增和删除的规范化资料。通过交叉比对 `normalized/` 文件与 wiki 页面的 `sources:` frontmatter，找出处理缺口。
 
 **检测逻辑：**
-- **新增文件**：`raw/` 中存在但没有任何 wiki 页面在 `sources:` 中引用 → 需要知识提取
-- **已删除文件**：wiki 页面 `sources:` 引用了不存在的 `raw/` 文件 → 引用失效，需清理
+- **新增文件**：`normalized/` 中存在但没有任何 wiki 页面在 `sources:` 中引用 → 需要知识提取
+- **已删除文件**：wiki 页面 `sources:` 引用了不存在的 `normalized/` 文件 → 引用失效，需清理
 
 **Options:**
 - `--apply` — 执行清理（默认仅预览）。处理已删除文件的引用：
@@ -748,7 +748,7 @@ sources: [raw/example-article.md]
 **示例：**
 
 ```bash
-# 检查 raw/ 目录状态
+# 检查 normalized/ 目录状态
 python scripts/wiki.py refresh .
 
 # JSON 输出，供 agent 解析
@@ -760,13 +760,13 @@ python scripts/wiki.py refresh . --format json
 ```
 🔄 刷新检查完成
 
-📥 新增原始资料（需要知识提取）: 2 个
-   ☐ raw/new-article.md — New Article Title
-   ☐ raw/another-doc.md — Another Document
+📥 新增规范化资料（需要知识提取）: 2 个
+   ☐ normalized/new-article.md — New Article Title
+   ☐ normalized/another-doc.md — Another Document
    └── Agent 必须执行: 读取 → 提取实体/概念/关系 → 创建 wiki 页面 → 更新 log.md
 
-⚠️ 已删除的原始资料（引用失效）: 1 个
-   • raw/deleted-file.md
+⚠️ 已删除的规范化资料（引用失效）: 1 个
+   • normalized/deleted-file.md
      被引用于: entities/some-page.md
 
 📝 日志已更新: log.md
@@ -824,7 +824,7 @@ Agent:
 ☐ 已从 CLI 输出获取「pending_files」清单
 ☐ 对清单中的每个文件，执行以下循环：
 
-  文件 N: raw/<filename>.md
+  文件 N: normalized/<filename>.md
   ☐ 已读取该文件完整内容
   ☐ 已识别实体 → 创建 entities/<name>.md（含 frontmatter + wikilinks）
   ☐ 已识别概念 → 创建 concepts/<name>.md（含 frontmatter + wikilinks）
@@ -844,9 +844,9 @@ Agent:
 ☐ 已从 CLI 输出获取「stale_refs」清单
 ☐ 对清单中的每个引用，执行以下循环：
 
-  失效引用 N: raw/<deleted>.md ← <referrer>.md
+  失效引用 N: normalized/<deleted>.md ← <referrer>.md
   ☐ 已读取引用方页面完整内容
-  ☐ 已从 frontmatter sources: 中移除已删除的 raw 文件路径
+  ☐ 已从 frontmatter sources: 中移除已删除的 normalized 文件路径
   ☐ 已评估页面内容是否仍有效
     → 内容仍有效：仅清理 frontmatter，不改正文
     → 内容需要更新：标记过期、补充新来源或移除依赖该源的内容
@@ -861,7 +861,7 @@ Agent:
 
 ```
 for file in CLI 输出的 pending_files:
-    1. 读取 raw/<file> 完整内容
+    1. 读取 normalized/<file> 完整内容
     2. 提取实体、概念、关系
     3. 为每个提取项创建 wiki 页面（遵循 New page rule）
     4. 建立交叉引用（≥2 wikilinks/页）
@@ -879,14 +879,14 @@ for ref in CLI 输出的 stale_refs:
 ### Agent 调用示例
 
 ```
-用户: 看看 raw/ 有没有新文件需要处理
+用户: 看看 normalized/ 有没有新文件需要处理
 
 Agent:
   1. python wiki.py refresh . --format json
   2. 解析输出，发现 2 个新增文件
   3. 逐一执行知识提取：
-     - 读取 raw/new-article.md → 创建 entities/xxx.md, concepts/yyy.md
-     - 读取 raw/another-doc.md → 创建 concepts/zzz.md
+     - 读取 normalized/new-article.md → 创建 entities/xxx.md, concepts/yyy.md
+     - 读取 normalized/another-doc.md → 创建 concepts/zzz.md
   4. 更新 log.md
   5. 汇报：新增 2 个源文件，创建了 3 个 wiki 页面
 ```
@@ -898,7 +898,7 @@ When reading/writing wiki pages:
 1. **File names**: lowercase, hyphens (`transformer-architecture.md`)
 2. **Cross-reference**: use `[[wikilinks]]` between pages
 3. **Minimum links**: every new page links to >= 2 existing pages
-4. **Raw is immutable**: NEVER modify, rename, or delete files in `raw/`. Corrections and interpretations go in wiki pages under other directories.
+4. **Source files are immutable**: NEVER modify, rename, or delete files in `raw/` or `normalized/`. Corrections and interpretations go in wiki pages under other directories.
 5. **Always log**: append to `log.md` after every action
 6. **Read first**: before writing, check `SCHEMA.md`, `README.md`, and recent `log.md`
 7. **No skip rule**: Agent 必须完成 workflow 中的所有步骤。CLI 执行成功 ≠ 任务完成。知识提取、交叉引用、日志更新是强制步骤。
@@ -913,6 +913,7 @@ wiki/
 ├── README.md        # Navigation index
 ├── log.md           # Action log
 ├── raw/             # Immutable source material
+├── normalized/      # Normalized source material (parsed from raw/)
 ├── entities/        # People, projects, tools
 ├── concepts/        # Terms, methodologies
 ├── relations/       # Cross-references

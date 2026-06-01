@@ -24,7 +24,7 @@ def cmd_list(args: argparse.Namespace) -> None:
     if hasattr(args, "category") and args.category:
         docs = [d for d in docs if d["category"] == args.category]
     elif not getattr(args, "include_raw", False):
-        docs = [d for d in docs if d["category"] != "raw"]
+        docs = [d for d in docs if d["category"] not in ("raw", "normalized")]
 
     if hasattr(args, "tags") and args.tags:
         filter_tags = {t.strip().lower() for t in args.tags.split(",") if t.strip()}
@@ -51,7 +51,7 @@ def cmd_list(args: argparse.Namespace) -> None:
             print(f"  [{d['category_label']}] ({d['category']}/)")
         tags_str = f" [{', '.join(d['tags'])}]" if d["tags"] else ""
         links_str = f"  🔗{d['links_count']}" if d["links_count"] > 0 else ""
-        readonly = "  🔒只读" if d["category"] == "raw" else ""
+        readonly = "  🔒只读" if d["category"] in ("raw", "normalized") else ""
         print(f"    {d['title']}")
         print(f"    ├─ {d['file']}  ({d['size']}B, {d['modified']}){tags_str}{links_str}{readonly}")
         print()
@@ -153,7 +153,7 @@ def _try_index_search(path: Path, keyword: str, docs: list[dict], no_raw: bool =
         return []
 
     if no_raw:
-        raw_prefixes = ("raw/", "raw\\")
+        raw_prefixes = ("raw/", "raw\\", "normalized/", "normalized\\")
         entries = [e for e in entries if not e["file"].startswith(raw_prefixes)]
 
     # Group entries by file, dedup line numbers
@@ -209,7 +209,7 @@ def cmd_search(args: argparse.Namespace) -> None:
     docs = collect_documents_cached(path)
 
     if getattr(args, "no_raw", False):
-        docs = [d for d in docs if d["category"] != "raw"]
+        docs = [d for d in docs if d["category"] not in ("raw", "normalized")]
 
     # Try inverted index first (non-regex only)
     use_index = getattr(args, "use_index", False)
@@ -297,7 +297,7 @@ def cmd_tags(args: argparse.Namespace) -> None:
 
     tag_map: dict[str, dict] = {}
     for d in docs:
-        if d["category"] == "raw":
+        if d["category"] in ("raw", "normalized"):
             continue
         for t in d.get("tags", []):
             t = t.strip()
@@ -368,7 +368,7 @@ def cmd_stats(args: argparse.Namespace) -> None:
 
     orphan_count = 0
     for d in docs:
-        if d["category"] == "raw":
+        if d["category"] in ("raw", "normalized"):
             continue
         stem = Path(d["file"]).stem.lower()
         if stem in SYSTEM_FILES:

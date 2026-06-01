@@ -917,9 +917,9 @@ def cmd_archive(args: argparse.Namespace) -> None:
         print(f"❌ 未找到文档: {page}")
         sys.exit(1)
 
-    # Don't archive raw/ files
-    if source_doc["category"] == "raw":
-        print(f"❌ 不能归档 raw/ 目录中的文件（原始资料不可变）")
+    # Don't archive raw/ or normalized/ files
+    if source_doc["category"] in ("raw", "normalized"):
+        print(f"❌ 不能归档 {source_doc['category']}/ 目录中的文件（原始资料不可变）")
         sys.exit(1)
 
     old_title = source_doc["title"]

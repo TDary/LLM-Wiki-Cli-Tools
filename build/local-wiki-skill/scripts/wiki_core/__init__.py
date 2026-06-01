@@ -2,10 +2,11 @@
 
 VERSION = "1.4.0"
 
-DIRS = ["raw", "entities", "concepts", "relations", "queries", "drafts"]
+DIRS = ["raw", "normalized", "entities", "concepts", "relations", "queries", "drafts"]
 
 CATEGORY_LABELS = {
     "raw": "原始资料",
+    "normalized": "规范化资料",
     "entities": "实体",
     "concepts": "概念",
     "relations": "关系",

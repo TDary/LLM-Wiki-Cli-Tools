@@ -129,19 +129,19 @@ class TestSlugifyUrl:
 
 class TestGenerateFilename:
     def test_no_conflict(self, wiki_dir):
-        name = _generate_filename("test-doc", wiki_dir, "raw")
+        name = _generate_filename("test-doc", wiki_dir, "normalized")
         assert name == "test-doc.md"
 
     def test_conflict_appends_number(self, wiki_dir):
-        (wiki_dir / "raw" / "test.md").write_text("first", encoding="utf-8")
-        name = _generate_filename("test", wiki_dir, "raw")
+        (wiki_dir / "normalized" / "test.md").write_text("first", encoding="utf-8")
+        name = _generate_filename("test", wiki_dir, "normalized")
         assert name == "test-2.md"
 
     def test_multiple_conflicts(self, wiki_dir):
-        (wiki_dir / "raw" / "x.md").write_text("1", encoding="utf-8")
-        (wiki_dir / "raw" / "x-2.md").write_text("2", encoding="utf-8")
-        (wiki_dir / "raw" / "x-3.md").write_text("3", encoding="utf-8")
-        name = _generate_filename("x", wiki_dir, "raw")
+        (wiki_dir / "normalized" / "x.md").write_text("1", encoding="utf-8")
+        (wiki_dir / "normalized" / "x-2.md").write_text("2", encoding="utf-8")
+        (wiki_dir / "normalized" / "x-3.md").write_text("3", encoding="utf-8")
+        name = _generate_filename("x", wiki_dir, "normalized")
         assert name == "x-4.md"
 
     def test_different_subdir(self, wiki_dir):
@@ -529,12 +529,12 @@ class TestParseSourcesFromFrontmatter:
     """Test _parse_sources_from_frontmatter helper."""
 
     def test_single_source(self):
-        text = "---\ntitle: Test\nsources: [raw/foo.md]\n---\n"
-        assert _parse_sources_from_frontmatter(text) == ["raw/foo.md"]
+        text = "---\ntitle: Test\nsources: [normalized/foo.md]\n---\n"
+        assert _parse_sources_from_frontmatter(text) == ["normalized/foo.md"]
 
     def test_multiple_sources(self):
-        text = "---\ntitle: Test\nsources: [raw/a.md, raw/b.md]\n---\n"
-        assert _parse_sources_from_frontmatter(text) == ["raw/a.md", "raw/b.md"]
+        text = "---\ntitle: Test\nsources: [normalized/a.md, normalized/b.md]\n---\n"
+        assert _parse_sources_from_frontmatter(text) == ["normalized/a.md", "normalized/b.md"]
 
     def test_no_sources_field(self):
         text = "---\ntitle: Test\n---\n"
@@ -549,10 +549,10 @@ class TestParseSourcesFromFrontmatter:
         assert _parse_sources_from_frontmatter(text) == []
 
     def test_whitespace_handling(self):
-        text = "---\nsources: [ raw/a.md , raw/b.md ]\n---\n"
+        text = "---\nsources: [ normalized/a.md , normalized/b.md ]\n---\n"
         result = _parse_sources_from_frontmatter(text)
-        assert "raw/a.md" in result
-        assert "raw/b.md" in result
+        assert "normalized/a.md" in result
+        assert "normalized/b.md" in result
 
 
 class TestCmdRefresh:
@@ -568,7 +568,7 @@ class TestCmdRefresh:
         )
 
     def test_no_raw_files(self, wiki_dir, capsys):
-        """Refresh with empty raw/ should show no changes."""
+        """Refresh with empty normalized/ should show no changes."""
         args = self._make_args(wiki_dir)
         cmd_refresh(args)
         captured = capsys.readouterr()
@@ -577,24 +577,24 @@ class TestCmdRefresh:
     def test_new_raw_file_detected(self, wiki_dir, capsys):
         """Raw file not referenced by any wiki page should be flagged as new."""
         # Create a raw file with no wiki page referencing it
-        raw_file = wiki_dir / "raw" / "new-article.md"
+        raw_file = wiki_dir / "normalized" / "new-article.md"
         raw_file.write_text("# New Article\n\nSome content.\n", encoding="utf-8")
 
         args = self._make_args(wiki_dir)
         cmd_refresh(args)
         captured = capsys.readouterr()
-        assert "新增原始资料" in captured.out
-        assert "raw/new-article.md" in captured.out
+        assert "新增规范化资料" in captured.out
+        assert "normalized/new-article.md" in captured.out
 
     def test_processed_raw_file_not_flagged(self, wiki_dir, capsys):
         """Raw file referenced by a wiki page should NOT be flagged."""
         # Create a raw file
-        raw_file = wiki_dir / "raw" / "processed.md"
+        raw_file = wiki_dir / "normalized" / "processed.md"
         raw_file.write_text("# Processed\n\nContent.\n", encoding="utf-8")
 
         # Create a wiki page that references it
         _write_page(wiki_dir, "entities", "my-entity.md",
-                     "---\ntitle: My Entity\nsources: [raw/processed.md]\n---\n# My Entity\n")
+                     "---\ntitle: My Entity\nsources: [normalized/processed.md]\n---\n# My Entity\n")
 
         clear_doc_cache()
         args = self._make_args(wiki_dir)
@@ -606,37 +606,37 @@ class TestCmdRefresh:
         """Wiki page referencing a deleted raw file should be flagged."""
         # Create a wiki page referencing a non-existent raw file
         _write_page(wiki_dir, "concepts", "my-concept.md",
-                     "---\ntitle: My Concept\nsources: [raw/deleted.md]\n---\n# My Concept\n")
+                     "---\ntitle: My Concept\nsources: [normalized/deleted.md]\n---\n# My Concept\n")
 
         clear_doc_cache()
         args = self._make_args(wiki_dir)
         cmd_refresh(args)
         captured = capsys.readouterr()
-        assert "已删除的原始资料" in captured.out
-        assert "raw/deleted.md" in captured.out
+        assert "已删除的规范化资料" in captured.out
+        assert "normalized/deleted.md" in captured.out
 
     def test_mixed_new_and_deleted(self, wiki_dir, capsys):
         """Both new and deleted files should be reported."""
         # New raw file (unreferenced)
-        new_raw = wiki_dir / "raw" / "new.md"
+        new_raw = wiki_dir / "normalized" / "new.md"
         new_raw.write_text("# New\n", encoding="utf-8")
 
         # Wiki page referencing deleted raw file
         _write_page(wiki_dir, "entities", "e.md",
-                     "---\ntitle: E\nsources: [raw/gone.md]\n---\n# E\n")
+                     "---\ntitle: E\nsources: [normalized/gone.md]\n---\n# E\n")
 
         clear_doc_cache()
         args = self._make_args(wiki_dir)
         cmd_refresh(args)
         captured = capsys.readouterr()
-        assert "新增原始资料" in captured.out
-        assert "raw/new.md" in captured.out
-        assert "已删除的原始资料" in captured.out
-        assert "raw/gone.md" in captured.out
+        assert "新增规范化资料" in captured.out
+        assert "normalized/new.md" in captured.out
+        assert "已删除的规范化资料" in captured.out
+        assert "normalized/gone.md" in captured.out
 
     def test_json_output_new_files(self, wiki_dir):
         """JSON output should list new files with metadata."""
-        raw_file = wiki_dir / "raw" / "article.md"
+        raw_file = wiki_dir / "normalized" / "article.md"
         raw_file.write_text("# Article Title\n\nBody.\n", encoding="utf-8")
 
         clear_doc_cache()
@@ -650,7 +650,7 @@ class TestCmdRefresh:
 
         assert output["action"] == "refresh"
         assert output["summary"]["new"] == 1
-        assert output["new_files"][0]["file"] == "raw/article.md"
+        assert output["new_files"][0]["file"] == "normalized/article.md"
         assert output["agent_required"] is True
         assert "pending_files" in output
 
@@ -672,7 +672,7 @@ class TestCmdRefresh:
     def test_json_output_stale_refs(self, wiki_dir):
         """JSON output should list stale references with referrer pages."""
         _write_page(wiki_dir, "concepts", "c.md",
-                     "---\ntitle: C\nsources: [raw/missing.md]\n---\n# C\n")
+                     "---\ntitle: C\nsources: [normalized/missing.md]\n---\n# C\n")
 
         clear_doc_cache()
         args = self._make_args(wiki_dir, fmt="json")
@@ -684,12 +684,12 @@ class TestCmdRefresh:
         sys.stdout = old_stdout
 
         assert output["summary"]["stale"] == 1
-        assert output["stale_actions"][0]["raw_file"] == "raw/missing.md"
+        assert output["stale_actions"][0]["raw_file"] == "normalized/missing.md"
         assert output["stale_actions"][0]["referrer"] == "concepts/c.md"
 
     def test_log_updated(self, wiki_dir):
         """Refresh should update log.md."""
-        raw_file = wiki_dir / "raw" / "test.md"
+        raw_file = wiki_dir / "normalized" / "test.md"
         raw_file.write_text("# Test\n", encoding="utf-8")
 
         clear_doc_cache()
@@ -709,9 +709,9 @@ class TestCmdRefresh:
     def test_apply_cleans_multi_source_ref(self, wiki_dir, capsys):
         """--apply should remove stale ref from multi-source page."""
         # Create the surviving raw file
-        (wiki_dir / "raw" / "other.md").write_text("# Other\n", encoding="utf-8")
+        (wiki_dir / "normalized" / "other.md").write_text("# Other\n", encoding="utf-8")
         _write_page(wiki_dir, "entities", "e.md",
-                     "---\ntitle: E\nsources: [raw/gone.md, raw/other.md]\n---\n# E\n")
+                     "---\ntitle: E\nsources: [normalized/gone.md, normalized/other.md]\n---\n# E\n")
 
         clear_doc_cache()
         args = self._make_args(wiki_dir, apply=True)
@@ -721,13 +721,13 @@ class TestCmdRefresh:
 
         # Verify file was updated
         content = (wiki_dir / "entities" / "e.md").read_text(encoding="utf-8")
-        assert "raw/gone.md" not in content
-        assert "raw/other.md" in content
+        assert "normalized/gone.md" not in content
+        assert "normalized/other.md" in content
 
     def test_apply_marks_single_source_summary(self, wiki_dir, capsys):
         """--apply should mark single-source summary page with archive_suggested."""
         _write_page(wiki_dir, "drafts", "d.md",
-                     "---\ntitle: D\nsources: [raw/gone.md]\n---\n# D\nshort\n")
+                     "---\ntitle: D\nsources: [normalized/gone.md]\n---\n# D\nshort\n")
 
         clear_doc_cache()
         args = self._make_args(wiki_dir, apply=True)
@@ -738,13 +738,13 @@ class TestCmdRefresh:
         content = (wiki_dir / "drafts" / "d.md").read_text(encoding="utf-8")
         assert "archive_suggested: true" in content
         assert "source_status: review" in content
-        assert "raw/gone.md" not in content
+        assert "normalized/gone.md" not in content
 
     def test_apply_marks_single_source_general_knowledge(self, wiki_dir, capsys):
         """--apply should mark single-source general knowledge page for review."""
         long_content = "# Knowledge\n\n" + "This is general knowledge. " * 50
         _write_page(wiki_dir, "concepts", "k.md",
-                     f"---\ntitle: K\nsources: [raw/gone.md]\n---\n\n{long_content}")
+                     f"---\ntitle: K\nsources: [normalized/gone.md]\n---\n\n{long_content}")
 
         clear_doc_cache()
         args = self._make_args(wiki_dir, apply=True)
@@ -755,12 +755,12 @@ class TestCmdRefresh:
         content = (wiki_dir / "concepts" / "k.md").read_text(encoding="utf-8")
         assert "source_status: review" in content
         assert "archive_suggested" not in content
-        assert "raw/gone.md" not in content
+        assert "normalized/gone.md" not in content
 
     def test_dry_run_does_not_modify_files(self, wiki_dir, capsys):
         """Without --apply, files should not be modified."""
         _write_page(wiki_dir, "concepts", "c.md",
-                     "---\ntitle: C\nsources: [raw/gone.md]\n---\n# C\n")
+                     "---\ntitle: C\nsources: [normalized/gone.md]\n---\n# C\n")
 
         original = (wiki_dir / "concepts" / "c.md").read_text(encoding="utf-8")
 
@@ -776,7 +776,7 @@ class TestCmdRefresh:
     def test_json_output_stale_actions_structure(self, wiki_dir):
         """JSON stale_actions should include action type and classification."""
         _write_page(wiki_dir, "concepts", "c.md",
-                     "---\ntitle: C\nsources: [raw/gone.md]\n---\n# C\nshort\n")
+                     "---\ntitle: C\nsources: [normalized/gone.md]\n---\n# C\nshort\n")
 
         clear_doc_cache()
         args = self._make_args(wiki_dir, fmt="json")
@@ -830,33 +830,33 @@ class TestUpdateFrontmatterSources:
     """Test _update_frontmatter_sources helper."""
 
     def test_remove_source(self):
-        text = "---\ntitle: T\nsources: [raw/a.md, raw/b.md]\n---\n# T\nBody.\n"
-        result = _update_frontmatter_sources(text, "raw/a.md")
-        assert "raw/a.md" not in result
-        assert "raw/b.md" in result
+        text = "---\ntitle: T\nsources: [normalized/a.md, normalized/b.md]\n---\n# T\nBody.\n"
+        result = _update_frontmatter_sources(text, "normalized/a.md")
+        assert "normalized/a.md" not in result
+        assert "normalized/b.md" in result
         assert "# T" in result
         assert "Body." in result
 
     def test_remove_only_source_leaves_empty(self):
-        text = "---\ntitle: T\nsources: [raw/a.md]\n---\n# T\nBody.\n"
-        result = _update_frontmatter_sources(text, "raw/a.md")
+        text = "---\ntitle: T\nsources: [normalized/a.md]\n---\n# T\nBody.\n"
+        result = _update_frontmatter_sources(text, "normalized/a.md")
         assert "sources: []" in result
 
     def test_add_fields(self):
-        text = "---\ntitle: T\nsources: [raw/a.md]\n---\n# T\n"
-        result = _update_frontmatter_sources(text, "raw/a.md")
+        text = "---\ntitle: T\nsources: [normalized/a.md]\n---\n# T\n"
+        result = _update_frontmatter_sources(text, "normalized/a.md")
         result = _update_frontmatter_fields(result, {"source_status": "review"})
         assert "source_status: review" in result
 
     def test_preserves_body_content(self):
-        text = "---\ntitle: T\nsources: [raw/a.md]\n---\n# Heading\n\nParagraph text.\n"
-        result = _update_frontmatter_sources(text, "raw/a.md")
+        text = "---\ntitle: T\nsources: [normalized/a.md]\n---\n# Heading\n\nParagraph text.\n"
+        result = _update_frontmatter_sources(text, "normalized/a.md")
         assert "# Heading" in result
         assert "Paragraph text." in result
 
     def test_no_frontmatter_returns_unchanged(self):
         text = "# No frontmatter\nJust content.\n"
-        result = _update_frontmatter_sources(text, "raw/a.md")
+        result = _update_frontmatter_sources(text, "normalized/a.md")
         assert result == text
 
 
@@ -866,10 +866,10 @@ class TestProcessStaleRefs:
     def test_multi_source_clean_reference(self, wiki_dir):
         """Multi-source page should get clean_reference action."""
         _write_page(wiki_dir, "entities", "e.md",
-                     "---\ntitle: E\nsources: [raw/gone.md, raw/keep.md]\n---\n# E\n")
+                     "---\ntitle: E\nsources: [normalized/gone.md, raw/keep.md]\n---\n# E\n")
 
         clear_doc_cache()
-        actions = _process_stale_refs(wiki_dir, {"raw/gone.md": ["entities/e.md"]}, apply=False)
+        actions = _process_stale_refs(wiki_dir, {"normalized/gone.md": ["entities/e.md"]}, apply=False)
         assert len(actions) == 1
         assert actions[0]["action"] == "clean_reference"
         assert actions[0]["is_only_source"] is False
@@ -877,10 +877,10 @@ class TestProcessStaleRefs:
     def test_single_source_summary_suggests_archive(self, wiki_dir):
         """Single-source summary page should get suggest_archive action."""
         _write_page(wiki_dir, "drafts", "d.md",
-                     "---\ntitle: D\nsources: [raw/gone.md]\n---\n# D\nShort.\n")
+                     "---\ntitle: D\nsources: [normalized/gone.md]\n---\n# D\nShort.\n")
 
         clear_doc_cache()
-        actions = _process_stale_refs(wiki_dir, {"raw/gone.md": ["drafts/d.md"]}, apply=False)
+        actions = _process_stale_refs(wiki_dir, {"normalized/gone.md": ["drafts/d.md"]}, apply=False)
         assert len(actions) == 1
         assert actions[0]["action"] == "suggest_archive"
         assert actions[0]["content_type"] == "summary"
@@ -889,10 +889,10 @@ class TestProcessStaleRefs:
         """Single-source general knowledge page should get mark_review action."""
         long_content = "# Knowledge\n\n" + "General content. " * 50
         _write_page(wiki_dir, "concepts", "k.md",
-                     f"---\ntitle: K\nsources: [raw/gone.md]\n---\n\n{long_content}")
+                     f"---\ntitle: K\nsources: [normalized/gone.md]\n---\n\n{long_content}")
 
         clear_doc_cache()
-        actions = _process_stale_refs(wiki_dir, {"raw/gone.md": ["concepts/k.md"]}, apply=False)
+        actions = _process_stale_refs(wiki_dir, {"normalized/gone.md": ["concepts/k.md"]}, apply=False)
         assert len(actions) == 1
         assert actions[0]["action"] == "mark_review"
         assert actions[0]["content_type"] == "general"
@@ -900,26 +900,26 @@ class TestProcessStaleRefs:
     def test_apply_modifies_file(self, wiki_dir):
         """With apply=True, should actually modify the file."""
         _write_page(wiki_dir, "entities", "e.md",
-                     "---\ntitle: E\nsources: [raw/gone.md, raw/keep.md]\n---\n# E\nBody.\n")
+                     "---\ntitle: E\nsources: [normalized/gone.md, normalized/keep.md]\n---\n# E\nBody.\n")
 
         clear_doc_cache()
-        actions = _process_stale_refs(wiki_dir, {"raw/gone.md": ["entities/e.md"]}, apply=True)
+        actions = _process_stale_refs(wiki_dir, {"normalized/gone.md": ["entities/e.md"]}, apply=True)
         assert actions[0].get("applied") is True
 
         content = (wiki_dir / "entities" / "e.md").read_text(encoding="utf-8")
-        assert "raw/gone.md" not in content
-        assert "raw/keep.md" in content
+        assert "normalized/gone.md" not in content
+        assert "normalized/keep.md" in content
 
     def test_multiple_stale_files_same_referrer(self, wiki_dir):
         """Multiple stale sources pointing to the same referrer page."""
-        (wiki_dir / "raw" / "keep.md").write_text("# Keep\n", encoding="utf-8")
+        (wiki_dir / "normalized" / "keep.md").write_text("# Keep\n", encoding="utf-8")
         _write_page(wiki_dir, "entities", "e.md",
-                     "---\ntitle: E\nsources: [raw/gone1.md, raw/gone2.md, raw/keep.md]\n---\n# E\n")
+                     "---\ntitle: E\nsources: [normalized/gone1.md, normalized/gone2.md, normalized/keep.md]\n---\n# E\n")
 
         clear_doc_cache()
         actions = _process_stale_refs(
             wiki_dir,
-            {"raw/gone1.md": ["entities/e.md"], "raw/gone2.md": ["entities/e.md"]},
+            {"normalized/gone1.md": ["entities/e.md"], "normalized/gone2.md": ["entities/e.md"]},
             apply=False,
         )
         assert len(actions) == 2
@@ -931,7 +931,7 @@ class TestProcessStaleRefs:
         # Stale ref points to a file that doesn't exist
         actions = _process_stale_refs(
             wiki_dir,
-            {"raw/gone.md": ["entities/nonexistent.md"]},
+            {"normalized/gone.md": ["entities/nonexistent.md"]},
             apply=False,
         )
         assert len(actions) == 0
@@ -960,25 +960,25 @@ class TestCmdRefreshEdgeCases:
 
     def test_unreferenced_raw_subdirectory_ignored(self, wiki_dir, capsys):
         """Only *.md files in raw/ are scanned, subdirectories ignored."""
-        (wiki_dir / "raw" / "subdir").mkdir()
-        (wiki_dir / "raw" / "subdir" / "nested.md").write_text("# Nested\n", encoding="utf-8")
-        (wiki_dir / "raw" / "top.md").write_text("# Top\n", encoding="utf-8")
+        (wiki_dir / "normalized" / "subdir").mkdir()
+        (wiki_dir / "normalized" / "subdir" / "nested.md").write_text("# Nested\n", encoding="utf-8")
+        (wiki_dir / "normalized" / "top.md").write_text("# Top\n", encoding="utf-8")
 
         clear_doc_cache()
         args = self._make_args(wiki_dir)
         cmd_refresh(args)
         captured = capsys.readouterr()
         # top.md should be flagged as new, subdir/nested.md should not appear
-        assert "raw/top.md" in captured.out
+        assert "normalized/top.md" in captured.out
         assert "nested" not in captured.out
 
     def test_multiple_pages_ref_same_raw(self, wiki_dir, capsys):
         """Multiple wiki pages referencing the same raw file — not flagged as new."""
-        (wiki_dir / "raw" / "shared.md").write_text("# Shared\n", encoding="utf-8")
+        (wiki_dir / "normalized" / "shared.md").write_text("# Shared\n", encoding="utf-8")
         _write_page(wiki_dir, "entities", "a.md",
-                     "---\ntitle: A\nsources: [raw/shared.md]\n---\n# A\n")
+                     "---\ntitle: A\nsources: [normalized/shared.md]\n---\n# A\n")
         _write_page(wiki_dir, "concepts", "b.md",
-                     "---\ntitle: B\nsources: [raw/shared.md]\n---\n# B\n")
+                     "---\ntitle: B\nsources: [normalized/shared.md]\n---\n# B\n")
 
         clear_doc_cache()
         args = self._make_args(wiki_dir)
@@ -989,9 +989,9 @@ class TestCmdRefreshEdgeCases:
     def test_stale_ref_with_multiple_referrers(self, wiki_dir):
         """Stale raw file referenced by multiple pages — both listed in stale_detail."""
         _write_page(wiki_dir, "entities", "a.md",
-                     "---\ntitle: A\nsources: [raw/gone.md]\n---\n# A\n")
+                     "---\ntitle: A\nsources: [normalized/gone.md]\n---\n# A\n")
         _write_page(wiki_dir, "concepts", "b.md",
-                     "---\ntitle: B\nsources: [raw/gone.md]\n---\n# B\n")
+                     "---\ntitle: B\nsources: [normalized/gone.md]\n---\n# B\n")
 
         clear_doc_cache()
         args = self._make_args(wiki_dir, fmt="json")
@@ -1012,9 +1012,9 @@ class TestCmdRefreshEdgeCases:
     def test_json_output_stale_multi_referrers_actions(self, wiki_dir):
         """JSON stale_actions should have one entry per referrer, not per raw file."""
         _write_page(wiki_dir, "entities", "a.md",
-                     "---\ntitle: A\nsources: [raw/gone.md]\n---\n# A\nshort\n")
+                     "---\ntitle: A\nsources: [normalized/gone.md]\n---\n# A\nshort\n")
         _write_page(wiki_dir, "concepts", "b.md",
-                     "---\ntitle: B\nsources: [raw/gone.md]\n---\n# B\nshort\n")
+                     "---\ntitle: B\nsources: [normalized/gone.md]\n---\n# B\nshort\n")
 
         clear_doc_cache()
         args = self._make_args(wiki_dir, fmt="json")
@@ -1035,15 +1035,15 @@ class TestUpdateFrontmatterEdgeCases:
 
     def test_unclosed_frontmatter_returns_unchanged(self):
         """Frontmatter with no closing --- should return text unchanged."""
-        text = "---\ntitle: T\nsources: [raw/a.md]\n# Body\n"
-        result = _update_frontmatter_sources(text, "raw/a.md")
+        text = "---\ntitle: T\nsources: [normalized/a.md]\n# Body\n"
+        result = _update_frontmatter_sources(text, "normalized/a.md")
         assert result == text
 
     def test_remove_nonexistent_source(self):
         """Removing a source that isn't listed should leave sources unchanged."""
-        text = "---\ntitle: T\nsources: [raw/a.md]\n---\n# T\n"
-        result = _update_frontmatter_sources(text, "raw/b.md")
-        assert "raw/a.md" in result
+        text = "---\ntitle: T\nsources: [normalized/a.md]\n---\n# T\n"
+        result = _update_frontmatter_sources(text, "normalized/b.md")
+        assert "normalized/a.md" in result
         assert "sources:" in result
 
     def test_add_field_to_unclosed_frontmatter(self):
@@ -1099,7 +1099,7 @@ class TestClassifyPageContentEdgeCases:
 
     def test_empty_body_is_summary(self):
         """Page with only frontmatter and no body should be summary (len < 300)."""
-        text = "---\ntitle: T\nsources: [raw/a.md]\n---\n"
+        text = "---\ntitle: T\nsources: [normalized/a.md]\n---\n"
         assert _classify_page_content(text) == "summary"
 
     def test_no_nonempty_lines_avoids_division_by_zero(self):
@@ -1109,5 +1109,5 @@ class TestClassifyPageContentEdgeCases:
 
     def test_frontmatter_only_no_closing(self):
         """Unclosed frontmatter — body is empty, should be summary."""
-        text = "---\ntitle: T\nsources: [raw/a.md]"
+        text = "---\ntitle: T\nsources: [normalized/a.md]"
         assert _classify_page_content(text) == "summary"
