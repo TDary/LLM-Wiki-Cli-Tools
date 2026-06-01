@@ -47,9 +47,18 @@ def main() -> None:
     p_list = sub.add_parser("list", help="列举所有知识文档")
     p_list.add_argument("path", nargs="?", default=".")
     p_list.add_argument("--format", default="table", choices=["table", "json"])
-    p_list.add_argument("--category", default="", help="过滤指定目录 (raw/normalized/entities/concepts/relations/queries/drafts)")
+    p_list.add_argument(
+        "--category",
+        default="",
+        help="过滤指定目录 (raw/normalized/entities/concepts/relations/queries/drafts)",
+    )
     p_list.add_argument("--tags", default="", help="按标签过滤 (逗号分隔, 如 AI,tech)")
-    p_list.add_argument("--include-raw", action="store_true", dest="include_raw", help="包含原始/标准化资料目录 (默认排除)")
+    p_list.add_argument(
+        "--include-raw",
+        action="store_true",
+        dest="include_raw",
+        help="包含原始/标准化资料目录 (默认排除)",
+    )
     p_list.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
 
     p_index = sub.add_parser("index", help="生成结构化 JSON 索引")
