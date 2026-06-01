@@ -1,10 +1,10 @@
 ---
 name: wiki
-version: 1.4.5
+version: 1.5.0
 description: 创建、查询和管理本地知识库，纯文件模式，零依赖
 ---
 
-# Local Wiki Skill v1.4.0
+# Local Wiki Skill v1.5.0
 
 Zero-dependency local wiki management for Claude Code. Pure Python, pure files — no Git, no network, just Python 3.9+.
 
@@ -48,8 +48,8 @@ local-wiki-skill/
 | `health` 检查发现断链 | 立即运行 `fix --apply` 修复 |
 | `health` 检查发现孤立文档 | 为每个孤立文档建立至少 1 条 `[[wikilink]]` 关联 |
 | `search` 返回结果且用户问题需要综合分析 | 读取匹配文档全文，综合回答后判断是否回写 |
-| `refresh` 发现新增规范化资料 | 对每个新文件执行完整的知识提取流程（同 ingest 工作流） |
-| `refresh` 发现已删除的规范化资料 | 清理失效的 `sources:` 引用，更新相关 wiki 页面的 frontmatter |
+| `refresh` 发现新增标准化资料 | 对每个新文件执行完整的知识提取流程（同 ingest 工作流） |
+| `refresh` 发现已删除的标准化资料 | 清理失效的 `sources:` 引用，更新相关 wiki 页面的 frontmatter |
 | `rename` 执行成功 | 验证所有 wikilinks 已更新，检查 index.md 是否同步，更新 log.md |
 | `archive` 执行成功 | 验证 index.md 中已移除该页面，检查是否有上下文引用需要更新（如 query 页面），更新 log.md |
 | `fix --apply` 执行成功 | 自动验证修复结果（哪些链接被改了），更新 log.md |
@@ -731,7 +731,7 @@ sources: [normalized/example-article.md]
 /wiki refresh [path] [--apply] [--format table|json] [--pretty]
 ```
 
-刷新 `normalized/` 目录，检测新增和删除的规范化资料。通过交叉比对 `normalized/` 文件与 wiki 页面的 `sources:` frontmatter，找出处理缺口。
+刷新 `normalized/` 目录，检测新增和删除的标准化资料。通过交叉比对 `normalized/` 文件与 wiki 页面的 `sources:` frontmatter，找出处理缺口。
 
 **检测逻辑：**
 - **新增文件**：`normalized/` 中存在但没有任何 wiki 页面在 `sources:` 中引用 → 需要知识提取
@@ -760,12 +760,12 @@ python scripts/wiki.py refresh . --format json
 ```
 🔄 刷新检查完成
 
-📥 新增规范化资料（需要知识提取）: 2 个
+📥 新增标准化资料（需要知识提取）: 2 个
    ☐ normalized/new-article.md — New Article Title
    ☐ normalized/another-doc.md — Another Document
    └── Agent 必须执行: 读取 → 提取实体/概念/关系 → 创建 wiki 页面 → 更新 log.md
 
-⚠️ 已删除的规范化资料（引用失效）: 1 个
+⚠️ 已删除的标准化资料（引用失效）: 1 个
    • normalized/deleted-file.md
      被引用于: entities/some-page.md
 
@@ -810,7 +810,7 @@ Agent:
   │ 已删除文件处理（stale_refs）                                  │
   │   对每个失效引用：                                            │
   │   1. 读取引用方页面                                           │
-  │   2. 从 frontmatter sources: 中移除已删除的 raw 文件          │
+  │   2. 从 frontmatter sources: 中移除已删除的 normalized 文件          │
   │   3. 检查页面内容是否依赖该源文件                              │
   │      → 内容仍有效：仅清理 frontmatter                         │
   │      → 内容需要更新：标记或补充新来源                          │

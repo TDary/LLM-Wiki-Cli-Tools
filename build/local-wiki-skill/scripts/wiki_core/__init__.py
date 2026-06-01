@@ -6,7 +6,7 @@ DIRS = ["raw", "normalized", "entities", "concepts", "relations", "queries", "dr
 
 CATEGORY_LABELS = {
     "raw": "原始资料",
-    "normalized": "规范化资料",
+    "normalized": "标准化资料",
     "entities": "实体",
     "concepts": "概念",
     "relations": "关系",

@@ -40,7 +40,7 @@ This is **pure local mode**. There is no Git, no network, no sync. Files are the
 1. **Read before writing** — always check `SCHEMA.md`, `README.md`, and recent `log.md` first
 2. **Cross-reference** — every new page must link to >=2 existing pages with `[[wikilinks]]`
 3. **Log everything** — append to `log.md` after every action (ingest, update, query)
-4. **Raw is immutable** — NEVER modify, rename, or delete files in `raw/`. This is a hard constraint. Corrections and interpretations go in wiki pages under other directories.
+4. **Source files are immutable** — NEVER modify, rename, or delete files in `raw/` or `normalized/`. This is a hard constraint. Corrections and interpretations go in wiki pages under other directories.
 5. **No sync needed** — files are the sole source of truth
 
 ## Directory Layout
@@ -48,6 +48,7 @@ This is **pure local mode**. There is no Git, no network, no sync. Files are the
 | Directory | Purpose |
 |-----------|---------|
 | `raw/` | Immutable source material |
+| `normalized/` | Normalized source material (parsed from raw/) |
 | `entities/` | People, projects, tools, orgs |
 | `concepts/` | Ideas, terms, methodologies |
 | `relations/` | Cross-references between entities |
@@ -82,6 +83,7 @@ wiki/
 ├── README.md        # Navigation index
 ├── log.md           # Action log
 ├── raw/             # Immutable source material
+├── normalized/      # Normalized source material (parsed from raw/)
 ├── entities/        # People, projects, tools
 ├── concepts/        # Terms, methodologies
 ├── relations/       # Cross-references

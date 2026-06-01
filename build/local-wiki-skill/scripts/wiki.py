@@ -47,9 +47,9 @@ def main() -> None:
     p_list = sub.add_parser("list", help="列举所有知识文档")
     p_list.add_argument("path", nargs="?", default=".")
     p_list.add_argument("--format", default="table", choices=["table", "json"])
-    p_list.add_argument("--category", default="", help="过滤指定目录 (raw/entities/concepts/relations/queries/drafts)")
+    p_list.add_argument("--category", default="", help="过滤指定目录 (raw/normalized/entities/concepts/relations/queries/drafts)")
     p_list.add_argument("--tags", default="", help="按标签过滤 (逗号分隔, 如 AI,tech)")
-    p_list.add_argument("--include-raw", action="store_true", dest="include_raw", help="包含原始资料目录 (默认排除)")
+    p_list.add_argument("--include-raw", action="store_true", dest="include_raw", help="包含原始/标准化资料目录 (默认排除)")
     p_list.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
 
     p_index = sub.add_parser("index", help="生成结构化 JSON 索引")
@@ -61,7 +61,7 @@ def main() -> None:
     p_search.add_argument("keyword", help="搜索关键词")
     p_search.add_argument("path", nargs="?", default=".")
     p_search.add_argument("--format", default="table", choices=["table", "json"])
-    p_search.add_argument("--no-raw", action="store_true", dest="no_raw", help="排除原始资料目录")
+    p_search.add_argument("--no-raw", action="store_true", dest="no_raw", help="排除原始/标准化资料目录")
     p_search.add_argument("--regex", action="store_true", help="正则表达式搜索")
     p_search.add_argument("--use-index", action="store_true", dest="use_index", help="使用倒排索引加速搜索 (需先运行 index)")
     p_search.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
@@ -134,7 +134,7 @@ def main() -> None:
     p_ingest.add_argument("--pretty", action="store_true", help="JSON 缩进美化")
 
     # ── refresh ──
-    p_refresh = sub.add_parser("refresh", help="刷新 raw/ 目录，检测新增/删除的原始资料")
+    p_refresh = sub.add_parser("refresh", help="刷新 normalized/ 目录，检测新增/删除的标准化资料")
     p_refresh.add_argument("path", nargs="?", default=".")
     p_refresh.add_argument("--apply", action="store_true", help="执行清理（默认仅预览）")
     p_refresh.add_argument("--format", default="table", choices=["table", "json"])
